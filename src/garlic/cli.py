@@ -24,43 +24,88 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print("garlic: /garlic slash command installed in ~/.claude/commands/")
 
 
+def _format_duration(minutes: float) -> str:
+    """Format minutes as a human-readable duration string."""
+    hours = int(minutes // 60)
+    mins = int(minutes % 60)
+    if hours > 0:
+        return f"{hours}h {mins:02d}m"
+    return f"{mins}m"
+
+
+def _progress_bar(fraction: float, width: int = 20) -> str:
+    """Build an ASCII progress bar. fraction is 0.0–1.0+."""
+    filled = min(int(fraction * width), width)
+    bar = "\u2588" * filled + "\u2591" * (width - filled)
+    return bar
+
+
 def cmd_status(args: argparse.Namespace) -> None:
     """Show accumulated active coding time today."""
     config = load_config()
     state = load_state(config["reset_hour"])
 
     minutes = state["accumulated_minutes"]
-    hours = int(minutes // 60)
-    mins = int(minutes % 60)
-
-    if hours > 0:
-        time_str = f"{hours}h {mins:02d}m"
-    else:
-        time_str = f"{mins}m"
-
-    print(f"{time_str} of active coding today")
-
-    # Show threshold progress
-    thresholds = config.get("nudge_thresholds_minutes", [])
+    time_str = _format_duration(minutes)
+    thresholds = sorted(config.get("nudge_thresholds_minutes", []))
     nudges_given = state.get("nudges_given", [])
-    for t in sorted(thresholds):
-        marker = "x" if t in nudges_given else " "
-        t_hours = int(t // 60)
-        t_mins = int(t % 60)
-        label = f"{t_hours}h {t_mins:02d}m" if t_hours > 0 else f"{t_mins}m"
-        print(f"  [{marker}] {label}")
+    ignored = state.get("ignored", False)
 
-    if state.get("ignored", False):
-        print("  (nudging ignored for today)")
+    # Header — ignored state is front and center if active
+    if ignored:
+        print(f"\U0001f9db {time_str} of active coding today (nudging paused)")
+        print(f"   run 'garlic ignore' to resume")
+    else:
+        # Pick icon based on progress toward next threshold
+        next_t = next((t for t in thresholds if t not in nudges_given), None)
+        if next_t is not None:
+            fraction = minutes / next_t if next_t > 0 else 1.0
+        else:
+            fraction = 1.0
+
+        if fraction < 0.5:
+            icon = "\U0001f9c4"  # garlic — safe zone
+        elif fraction < 0.85:
+            icon = "\U0001f9c4"  # garlic — still ok
+        else:
+            icon = "\U0001f9db"  # vampire — getting close
+
+        print(f"{icon} {time_str} of active coding today")
+
+    # Threshold progress
+    if thresholds:
+        print()
+        for t in thresholds:
+            passed = t in nudges_given
+            label = _format_duration(t)
+            if passed:
+                print(f"  \u2716 {label}")
+            elif minutes < t:
+                fraction = minutes / t if t > 0 else 1.0
+                bar = _progress_bar(fraction)
+                remaining = _format_duration(t - minutes)
+                print(f"  {bar} {label} ({remaining} to go)")
+            else:
+                # Crossed but not yet in nudges_given (edge case)
+                print(f"  \u2716 {label}")
+
+        # If all thresholds passed
+        if all(t in nudges_given for t in thresholds):
+            print(f"\n  \U0001f9db You've crossed every threshold. Respect.")
 
 
 def cmd_ignore(args: argparse.Namespace) -> None:
-    """Disable nudging for the rest of the day."""
+    """Toggle nudging for the rest of the day."""
     config = load_config()
     state = load_state(config["reset_hour"])
-    state["ignored"] = True
-    save_state(state)
-    print("garlic: nudging disabled for today (tracking continues)")
+    if state.get("ignored", False):
+        state["ignored"] = False
+        save_state(state)
+        print("garlic: nudging resumed")
+    else:
+        state["ignored"] = True
+        save_state(state)
+        print("garlic: nudging disabled for today (tracking continues)")
 
 
 def cmd_hook(args: argparse.Namespace) -> None:
