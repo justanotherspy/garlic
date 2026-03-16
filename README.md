@@ -14,7 +14,7 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
-The time model is simple: each time you submit a prompt, garlic looks at the gap since the last event. If the gap is short (under 10 minutes by default), it counts the full gap as active time. If the gap is long (you went for a walk, had lunch, etc.), it assumes you spent about 10 minutes getting back up to speed. This keeps the estimate honest without needing to spy on your screen.
+The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 10 minutes by default — if you step away for an hour, garlic assumes you spent about 10 minutes getting back up to speed rather than counting the full absence. This keeps the estimate honest without needing to spy on your screen.
 
 As you approach configurable thresholds (1 hour, 2 hours, etc.), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt.
 
@@ -38,9 +38,20 @@ This does two things:
 
 Setup is idempotent — safe to run again if you need to repair or update hooks.
 
+## Upgrading
+
+```bash
+uv tool install garlic-cli --upgrade
+```
+
+Then re-run `garlic setup` to update your hooks if the release notes mention hook changes.
+
 ## Usage
 
 ```bash
+# Check your installed version
+garlic version
+
 # See how long you have been Clauding today
 garlic status
 
