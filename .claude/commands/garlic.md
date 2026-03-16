@@ -1,0 +1,1 @@
+Run `garlic status` and show the output to me.

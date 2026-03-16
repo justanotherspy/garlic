@@ -7,6 +7,9 @@ from typing import Any
 from garlic.config import load_config
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+CLAUDE_COMMANDS_DIR = Path.home() / ".claude" / "commands"
+
+GARLIC_COMMAND = "Run `garlic status` and show the output to me.\n"
 
 _HOOK_DEFINITIONS = [
     ("SessionStart", "startup", "garlic hook session-start"),
@@ -63,3 +66,13 @@ def install_hooks(debug: bool = False) -> None:
         event_hooks.append(entry)
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+
+    # Install /garlic slash command globally
+    install_slash_command()
+
+
+def install_slash_command() -> None:
+    """Install the /garlic slash command into ~/.claude/commands/."""
+    CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
+    command_path = CLAUDE_COMMANDS_DIR / "garlic.md"
+    command_path.write_text(GARLIC_COMMAND)
