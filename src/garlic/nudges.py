@@ -8,6 +8,16 @@ GENTLE = [
     "{time} in the flow. Remember to blink and hydrate.",
     "Friendly nudge: {time} of coding. Your future self will thank you for a break.",
     "You've been at it for {time}. A quick breather can sharpen your focus.",
+    "{time} today. Have you looked at something more than 20 feet away recently?",
+    "Gentle check-in: {time} of coding. A glass of water might hit right about now.",
+    "{time} and counting. Fresh air does wonders for a stuck problem.",
+    "You've been focused for {time}. Your neck and shoulders could probably use a stretch.",
+    "Hey, {time} of solid work. Step outside for a minute — the code will wait.",
+    "{time} in. A five-minute walk can untangle more than an hour of staring.",
+    "Just noting: {time} of active coding. Your eyes would love a break from the screen.",
+    "{time} today. Sometimes the best debugging happens away from the keyboard.",
+    "{time} of coding — not bad. Refill that water bottle?",
+    "You've been going for {time}. Even a one-minute stretch makes a difference.",
 ]
 
 FIRM = [
@@ -16,6 +26,16 @@ FIRM = [
     "That's {time} of active work. Stand up, walk around, come back fresh.",
     "{time} logged. Your brain needs downtime to consolidate what you've learned.",
     "Seriously, {time}. Close the laptop lid for ten minutes.",
+    "{time} of work. Diminishing returns are real — take a break now, ship better code later.",
+    "You've hit {time}. Your focus isn't as sharp as it was an hour ago. Break time.",
+    "{time} in. Go eat something. Real food, not just snacks at your desk.",
+    "That's {time}. Step away. The diff will make more sense with fresh eyes.",
+    "{time} today. Breaks aren't optional — they're part of doing good work.",
+    "{time} of coding. Your back is not going to forgive you if you don't move.",
+    "You're at {time}. Take a proper break — walk around the block, not just to the fridge.",
+    "{time} logged. The problems you're solving deserve a rested brain.",
+    "{time}. You've earned a break. Take it before you start making tired mistakes.",
+    "That's {time} of active coding. Close the editor. Stand up. Ten minutes minimum.",
 ]
 
 SPICY = [
@@ -24,6 +44,16 @@ SPICY = [
     "{time}?! Your chair has a YOU-shaped dent. Get up.",
     "The code will still be broken after a break. {time} is enough.",
     "{time} in. Even the AI thinks you need to chill.",
+    "{time}. Your screen tan is coming in nicely. Go outside.",
+    "You've been pair-programming with an AI for {time}. That's not a personality.",
+    "{time} of coding. If I had legs I'd walk away. You have legs. Use them.",
+    "{time}?! I'm a language model and even I think this is excessive.",
+    "Congrats on {time}. Your vertebrae are filing a class-action lawsuit.",
+    "{time} logged. You know what's a great IDE? A park bench.",
+    "Look, {time}. At this point I'm enabling you. Go away.",
+    "{time}. The bugs will still be there when you get back. They always are.",
+    "You've been at this for {time}. Your future chiropractor thanks you for the job security.",
+    "{time} of letting an AI do your thinking. Go think your own thoughts for a bit.",
 ]
 
 POOLS = {

@@ -35,6 +35,12 @@ def _write_toml(path: Path, data: dict[str, Any]) -> None:
     path.write_text("\n".join(lines) + "\n")
 
 
+def save_config(config: dict[str, Any]) -> None:
+    """Write config to disk."""
+    GARLIC_DIR.mkdir(parents=True, exist_ok=True)
+    _write_toml(CONFIG_PATH, config)
+
+
 def load_config() -> dict[str, Any]:
     """Load config from disk, creating it with defaults if missing."""
     if not CONFIG_PATH.exists():

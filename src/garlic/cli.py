@@ -4,7 +4,7 @@ import argparse
 import importlib.metadata
 import sys
 
-from garlic.config import load_config
+from garlic.config import DEFAULTS, load_config, save_config
 from garlic.hooks import hook_prompt, hook_session_start, hook_stop
 from garlic.setup import install_hooks
 from garlic.state import load_state, save_state
@@ -108,6 +108,78 @@ def cmd_ignore(args: argparse.Namespace) -> None:
         print("garlic: nudging disabled for today (tracking continues)")
 
 
+VALID_NUDGE_STYLES = ("gentle", "firm", "spicy")
+
+
+def _parse_config_value(key: str, raw: str) -> object:
+    """Parse and validate a config value string for the given key."""
+    if key == "nudge_style":
+        if raw not in VALID_NUDGE_STYLES:
+            raise ValueError(
+                f"nudge_style must be one of: {', '.join(VALID_NUDGE_STYLES)}"
+            )
+        return raw
+    if key == "nudge_thresholds_minutes":
+        try:
+            return [int(x.strip()) for x in raw.split(",")]
+        except ValueError:
+            raise ValueError(
+                "nudge_thresholds_minutes must be comma-separated integers (e.g. 60,120,180)"
+            )
+    if key in ("max_prompt_gap_minutes", "reset_hour"):
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(f"{key} must be an integer")
+    raise ValueError(
+        f"unknown config key: {key}. Valid keys: {', '.join(DEFAULTS)}"
+    )
+
+
+def cmd_set(args: argparse.Namespace) -> None:
+    """Update a config value."""
+    if "=" not in args.assignment:
+        print(f"garlic: expected KEY=VALUE, got '{args.assignment}'", file=sys.stderr)
+        sys.exit(1)
+
+    key, raw = args.assignment.split("=", 1)
+    key = key.strip()
+    raw = raw.strip()
+
+    try:
+        value = _parse_config_value(key, raw)
+    except ValueError as e:
+        print(f"garlic: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    config = load_config()
+    config[key] = value
+    save_config(config)
+    print(f"garlic: set {key} = {value}")
+
+
+def cmd_reset(args: argparse.Namespace) -> None:
+    """Reset the daily timer after user confirmation."""
+    if not args.yes:
+        try:
+            answer = input("garlic: reset timer to zero for today? [y/N] ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            sys.exit(1)
+        if answer.strip().lower() not in ("y", "yes"):
+            print("garlic: reset cancelled")
+            return
+
+    config = load_config()
+    state = load_state(config["reset_hour"])
+    state["accumulated_minutes"] = 0.0
+    state["nudges_given"] = []
+    state["ignored"] = False
+    state["last_event_time"] = 0.0
+    save_state(state)
+    print("garlic: timer reset for today")
+
+
 def cmd_hook(args: argparse.Namespace) -> None:
     """Handle a Claude Code hook event."""
     dispatch = {
@@ -133,7 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("status", help="Show accumulated active time today")
-    sub.add_parser("ignore", help="Disable nudging for the day")
+    sub.add_parser("ignore", help="Toggle nudging for the day")
+
+    set_parser = sub.add_parser("set", help="Update a config value (KEY=VALUE)")
+    set_parser.add_argument(
+        "assignment", help="Config assignment (e.g. nudge_style=spicy)"
+    )
+
+    reset_parser = sub.add_parser("reset", help="Reset daily timer to zero")
+    reset_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Skip confirmation prompt"
+    )
 
     hook_parser = sub.add_parser("hook", help="Handle a Claude Code hook event")
     hook_parser.add_argument(
@@ -161,6 +243,8 @@ def main() -> None:
         "setup": cmd_setup,
         "status": cmd_status,
         "ignore": cmd_ignore,
+        "set": cmd_set,
+        "reset": cmd_reset,
         "hook": cmd_hook,
     }
     dispatch[args.command](args)
