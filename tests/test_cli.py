@@ -1,6 +1,21 @@
 """Tests for the garlic CLI."""
 
-from garlic.cli import build_parser
+import importlib.metadata
+
+from garlic.cli import build_parser, cmd_version
+
+
+def test_parser_version():
+    parser = build_parser()
+    args = parser.parse_args(["version"])
+    assert args.command == "version"
+
+
+def test_cmd_version_output(capsys):
+    cmd_version(None)
+    out = capsys.readouterr().out.strip()
+    expected = f"garlic {importlib.metadata.version('garlic-cli')}"
+    assert out == expected
 
 
 def test_parser_setup():
