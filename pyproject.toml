@@ -1,9 +1,18 @@
 [project]
-name = "garlic"
+name = "garlic-cli"
 version = "0.1.0"
 description = "Track active coding time with Claude Code and nudge yourself to take breaks"
 requires-python = ">=3.11"
 dependencies = []
+authors = [{name = "Daniel Schwartz", email = "danielschwar@gmail.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+classifiers = [
+    "Environment :: Console",
+    "Topic :: Software Development",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
 
 [project.scripts]
 garlic = "garlic.cli:main"

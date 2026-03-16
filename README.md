@@ -23,7 +23,7 @@ As you approach configurable thresholds (1 hour, 2 hours, etc.), garlic asks Cla
 Install garlic with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install garlic
+uv tool install garlic-cli
 ```
 
 Run setup to install the Claude Code hooks:
