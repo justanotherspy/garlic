@@ -8,35 +8,24 @@ from garlic.config import load_config
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
-HOOK_DEFINITIONS: list[dict[str, Any]] = [
-    {
-        "type": "command",
-        "command": "garlic hook session-start",
-    },
-    {
-        "type": "command",
-        "command": "garlic hook prompt",
-    },
-    {
-        "type": "command",
-        "command": "garlic hook stop",
-    },
+# Each entry: (event_key, matcher, command)
+HOOK_DEFINITIONS: list[tuple[str, str, str]] = [
+    ("SessionStart", "startup", "garlic hook session-start"),
+    ("UserPromptSubmit", "", "garlic hook prompt"),
+    ("Stop", "", "garlic hook stop"),
 ]
 
-# Map hook event names to Claude Code hook event keys
-HOOK_EVENTS = {
-    "garlic hook session-start": "SessionStart",
-    "garlic hook prompt": "UserPromptSubmit",
-    "garlic hook stop": "Stop",
-}
 
-# SessionStart uses a matcher
-SESSION_START_MATCHER = "startup"
-
-
-def _is_garlic_hook(hook: dict[str, Any]) -> bool:
-    """Check if a hook entry belongs to garlic."""
-    return hook.get("type") == "command" and hook.get("command", "").startswith(
+def _is_garlic_entry(entry: dict[str, Any]) -> bool:
+    """Check if a hook entry belongs to garlic (new envelope or legacy flat format)."""
+    # New envelope format: {"matcher": ..., "hooks": [...]}
+    if any(
+        h.get("type") == "command" and h.get("command", "").startswith("garlic hook")
+        for h in entry.get("hooks", [])
+    ):
+        return True
+    # Legacy flat format: {"type": "command", "command": "garlic hook ..."}
+    return entry.get("type") == "command" and entry.get("command", "").startswith(
         "garlic hook"
     )
 
@@ -56,21 +45,17 @@ def install_hooks() -> None:
 
     hooks = settings.setdefault("hooks", {})
 
-    for hook_def in HOOK_DEFINITIONS:
-        event_key = HOOK_EVENTS[hook_def["command"]]
+    for event_key, matcher, command in HOOK_DEFINITIONS:
         event_hooks = hooks.setdefault(event_key, [])
 
-        # Remove any existing garlic hooks for this event
-        event_hooks[:] = [h for h in event_hooks if not _is_garlic_hook(h)]
+        # Remove any existing garlic entries for this event
+        event_hooks[:] = [h for h in event_hooks if not _is_garlic_entry(h)]
 
-        # Build the new hook entry
+        # Build the envelope entry expected by Claude Code
         entry: dict[str, Any] = {
-            "type": "command",
-            "command": hook_def["command"],
+            "matcher": matcher,
+            "hooks": [{"type": "command", "command": command}],
         }
-        if event_key == "SessionStart":
-            entry["matcher"] = SESSION_START_MATCHER
-
         event_hooks.append(entry)
 
     settings_path.write_text(json.dumps(settings, indent=2) + "\n")

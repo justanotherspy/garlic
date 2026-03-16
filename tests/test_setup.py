@@ -17,14 +17,19 @@ def test_install_hooks_creates_settings(tmp_path, monkeypatch):
     hooks = settings["hooks"]
 
     assert len(hooks["SessionStart"]) == 1
-    assert hooks["SessionStart"][0]["command"] == "garlic hook session-start"
-    assert hooks["SessionStart"][0]["matcher"] == "startup"
+    ss = hooks["SessionStart"][0]
+    assert ss["matcher"] == "startup"
+    assert ss["hooks"][0]["command"] == "garlic hook session-start"
 
     assert len(hooks["UserPromptSubmit"]) == 1
-    assert hooks["UserPromptSubmit"][0]["command"] == "garlic hook prompt"
+    up = hooks["UserPromptSubmit"][0]
+    assert up["matcher"] == ""
+    assert up["hooks"][0]["command"] == "garlic hook prompt"
 
     assert len(hooks["Stop"]) == 1
-    assert hooks["Stop"][0]["command"] == "garlic hook stop"
+    st = hooks["Stop"][0]
+    assert st["matcher"] == ""
+    assert st["hooks"][0]["command"] == "garlic hook stop"
 
 
 def test_install_hooks_idempotent(tmp_path, monkeypatch):
@@ -63,5 +68,5 @@ def test_install_hooks_preserves_other_hooks(tmp_path, monkeypatch):
     prompt_hooks = settings["hooks"]["UserPromptSubmit"]
     assert len(prompt_hooks) == 2
     assert prompt_hooks[0]["command"] == "other-tool do-stuff"
-    assert prompt_hooks[1]["command"] == "garlic hook prompt"
+    assert prompt_hooks[1]["hooks"][0]["command"] == "garlic hook prompt"
     assert settings["other_setting"] is True
