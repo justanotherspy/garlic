@@ -15,21 +15,24 @@ def _read_hook_input() -> dict[str, Any]:
     return json.load(sys.stdin)
 
 
-def hook_session_start() -> None:
+def hook_session_start(debug: bool = False) -> None:
     """Handle SessionStart hook: record start timestamp."""
     _read_hook_input()
     config = load_config()
     state = load_state(config["reset_hour"])
+    if debug:
+        import sys
+        print("[garlic debug] session-start: recording timestamp", file=sys.stderr)
     handle_session_start(state)
     save_state(state)
 
 
-def hook_prompt() -> None:
+def hook_prompt(debug: bool = False) -> None:
     """Handle UserPromptSubmit hook: accumulate time, maybe nudge."""
     _read_hook_input()
     config = load_config()
     state = load_state(config["reset_hour"])
-    threshold = handle_prompt(state, config)
+    threshold = handle_prompt(state, config, debug=debug)
     save_state(state)
 
     if threshold is not None and not state.get("ignored", False):
@@ -37,10 +40,13 @@ def hook_prompt() -> None:
         print(nudge)
 
 
-def hook_stop() -> None:
+def hook_stop(debug: bool = False) -> None:
     """Handle Stop hook: update last_event_time."""
     _read_hook_input()
     config = load_config()
     state = load_state(config["reset_hour"])
+    if debug:
+        import sys
+        print("[garlic debug] stop: updating last_event_time", file=sys.stderr)
     handle_stop(state)
     save_state(state)

@@ -18,8 +18,9 @@ def cmd_version(args: argparse.Namespace) -> None:
 
 def cmd_setup(args: argparse.Namespace) -> None:
     """Install garlic hooks into ~/.claude/settings.json."""
-    install_hooks()
-    print("garlic: hooks installed in ~/.claude/settings.json")
+    install_hooks(debug=args.debug)
+    mode = " (debug mode)" if args.debug else ""
+    print(f"garlic: hooks installed in ~/.claude/settings.json{mode}")
 
 
 def cmd_status(args: argparse.Namespace) -> None:
@@ -68,7 +69,7 @@ def cmd_hook(args: argparse.Namespace) -> None:
         "prompt": hook_prompt,
         "stop": hook_stop,
     }
-    dispatch[args.hook_event]()
+    dispatch[args.hook_event](debug=args.debug)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -79,7 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("version", help="Show installed version")
-    sub.add_parser("setup", help="Install hooks into ~/.claude/settings.json")
+
+    setup_parser = sub.add_parser("setup", help="Install hooks into ~/.claude/settings.json")
+    setup_parser.add_argument(
+        "--debug", action="store_true", help="Install hooks with debug logging"
+    )
+
     sub.add_parser("status", help="Show accumulated active time today")
     sub.add_parser("ignore", help="Disable nudging for the day")
 
@@ -88,6 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
         "hook_event",
         choices=["session-start", "prompt", "stop"],
         help="Which hook event to handle",
+    )
+    hook_parser.add_argument(
+        "--debug", action="store_true", help="Log gap calculations to stderr"
     )
 
     return parser

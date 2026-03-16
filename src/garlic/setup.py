@@ -8,12 +8,16 @@ from garlic.config import load_config
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 
-# Each entry: (event_key, matcher, command)
-HOOK_DEFINITIONS: list[tuple[str, str, str]] = [
+_HOOK_DEFINITIONS = [
     ("SessionStart", "startup", "garlic hook session-start"),
     ("UserPromptSubmit", "", "garlic hook prompt"),
     ("Stop", "", "garlic hook stop"),
 ]
+
+
+def _hook_definitions(debug: bool) -> list[tuple[str, str, str]]:
+    suffix = " --debug" if debug else ""
+    return [(ev, m, cmd + suffix) for ev, m, cmd in _HOOK_DEFINITIONS]
 
 
 def _is_garlic_entry(entry: dict[str, Any]) -> bool:
@@ -30,7 +34,7 @@ def _is_garlic_entry(entry: dict[str, Any]) -> bool:
     )
 
 
-def install_hooks() -> None:
+def install_hooks(debug: bool = False) -> None:
     """Install garlic hooks into ~/.claude/settings.json (idempotent)."""
     # Ensure config exists
     load_config()
@@ -45,7 +49,7 @@ def install_hooks() -> None:
 
     hooks = settings.setdefault("hooks", {})
 
-    for event_key, matcher, command in HOOK_DEFINITIONS:
+    for event_key, matcher, command in _hook_definitions(debug):
         event_hooks = hooks.setdefault(event_key, [])
 
         # Remove any existing garlic entries for this event

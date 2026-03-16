@@ -1,10 +1,13 @@
 """Time gap calculation, accumulation, and threshold checking."""
 
+import sys
 import time
 from typing import Any
 
 
-def handle_prompt(state: dict[str, Any], config: dict[str, Any]) -> int | None:
+def handle_prompt(
+    state: dict[str, Any], config: dict[str, Any], debug: bool = False
+) -> int | None:
     """Process a prompt event: accumulate time and check thresholds.
 
     Returns the threshold (in minutes) that was just crossed, or None.
@@ -13,11 +16,22 @@ def handle_prompt(state: dict[str, Any], config: dict[str, Any]) -> int | None:
     last = state.get("last_event_time", 0.0)
 
     if last > 0:
-        gap_minutes = (now - last) / 60.0
+        raw_gap = (now - last) / 60.0
         cap = config["max_prompt_gap_minutes"]
-        if gap_minutes > cap:
-            gap_minutes = cap
+        gap_minutes = min(raw_gap, cap)
         state["accumulated_minutes"] += gap_minutes
+
+        if debug:
+            capped = raw_gap > cap
+            print(
+                f"[garlic debug] gap: {raw_gap:.2f}m"
+                + (f" → capped to {cap}m" if capped else "")
+                + f" | total: {state['accumulated_minutes']:.2f}m",
+                file=sys.stderr,
+            )
+    else:
+        if debug:
+            print("[garlic debug] no last_event_time, skipping gap", file=sys.stderr)
 
     state["last_event_time"] = now
 
