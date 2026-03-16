@@ -28,4 +28,8 @@ packages = ["src/garlic"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "build>=1.4.0",
+    "pytest>=8.0",
+    "twine>=6.2.0",
+]
