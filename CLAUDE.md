@@ -68,8 +68,10 @@ When `date` doesn't match the current day (accounting for `reset_hour`), state r
 
 ### Time tracking model
 - **Session start**: record timestamp as `last_event_time`
-- **Stop** (Claude finishes responding): update `last_event_time` to now (no accumulation, no cap — just moves the marker so the next gap measures from when Claude stopped, not from when the user prompted)
-- **Prompt**: compute gap = now − `last_event_time`. If gap > `max_prompt_gap_minutes`, cap it. Add capped gap to `accumulated_minutes`. Check thresholds; if a new one is crossed and not already in `nudges_given` and not `ignored`, output a nudge message to stdout and record the threshold.
+- **Stop** (Claude finishes responding): compute gap = now − `last_event_time` (generation time). Cap at `max_prompt_gap_minutes`. Add to `accumulated_minutes`. Update `last_event_time` to now.
+- **Prompt**: compute gap = now − `last_event_time` (reading/thinking time since Claude stopped). Cap at `max_prompt_gap_minutes`. Add to `accumulated_minutes`. Check thresholds; if a new one is crossed and not already in `nudges_given` and not `ignored`, output a nudge message to stdout and record the threshold.
+
+Both stop and prompt accumulate time — the full engagement cycle is counted: watching Claude generate + reading the response + thinking before the next prompt.
 
 ### Claude Code hooks installed by `garlic setup`
 Hooks go in `~/.claude/settings.json` under the `hooks` key:

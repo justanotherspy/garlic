@@ -41,12 +41,9 @@ def hook_prompt(debug: bool = False) -> None:
 
 
 def hook_stop(debug: bool = False) -> None:
-    """Handle Stop hook: update last_event_time."""
+    """Handle Stop hook: accumulate generation time and update last_event_time."""
     _read_hook_input()
     config = load_config()
     state = load_state(config["reset_hour"])
-    if debug:
-        import sys
-        print("[garlic debug] stop: updating last_event_time", file=sys.stderr)
-    handle_stop(state)
+    handle_stop(state, config, debug=debug)
     save_state(state)

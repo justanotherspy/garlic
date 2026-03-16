@@ -117,17 +117,46 @@ def test_handle_prompt_crosses_multiple_returns_highest():
     assert 120 in state["nudges_given"]
 
 
-def test_handle_stop_updates_last_event_time():
-    """Stop just updates last_event_time, no accumulation."""
+def test_handle_stop_accumulates_generation_time():
+    """Stop accumulates the gap since last event (generation time)."""
     now = 1710567900.0
-    state = _make_state(accumulated_minutes=30.0, last_event_time=now - 600)
+    # Last event was 3 minutes ago (e.g. user submitted prompt)
+    state = _make_state(accumulated_minutes=30.0, last_event_time=now - 180)
+    config = _make_config()
 
     with patch("garlic.engine.time") as mock_time:
         mock_time.time.return_value = now
-        handle_stop(state)
+        handle_stop(state, config)
 
     assert state["last_event_time"] == now
-    assert state["accumulated_minutes"] == 30.0  # unchanged
+    assert abs(state["accumulated_minutes"] - 33.0) < 0.01  # 30 + 3
+
+
+def test_handle_stop_caps_long_generation():
+    """Stop caps gap at max_prompt_gap_minutes like prompt does."""
+    now = 1710567900.0
+    state = _make_state(accumulated_minutes=0.0, last_event_time=now - 3600)
+    config = _make_config(max_prompt_gap_minutes=10)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_stop(state, config)
+
+    assert abs(state["accumulated_minutes"] - 10.0) < 0.01
+
+
+def test_handle_stop_no_accumulation_without_last_event():
+    """Stop with no prior last_event_time doesn't accumulate."""
+    now = 1710567900.0
+    state = _make_state(accumulated_minutes=0.0, last_event_time=0.0)
+    config = _make_config()
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_stop(state, config)
+
+    assert state["last_event_time"] == now
+    assert state["accumulated_minutes"] == 0.0
 
 
 def test_handle_session_start_records_timestamp():
@@ -152,7 +181,7 @@ def _at(base, minutes):
 
 
 def test_sequence_prompt_stop_prompt():
-    """Stop moves the marker; next prompt measures gap from stop, not prior prompt."""
+    """Full cycle: prompt gap + generation time + next prompt gap all accumulate."""
     base = 1710567900.0
     config = _make_config()
 
@@ -162,24 +191,24 @@ def test_sequence_prompt_stop_prompt():
         mt.time.return_value = _at(base, 0)
         handle_session_start(state)
 
-    # prompt at T=3 → gap 3m, total=3
+    # prompt at T=3 → gap from session-start: 3m, total=3
     with patch("garlic.engine.time") as mt:
         mt.time.return_value = _at(base, 3)
         handle_prompt(state, config)
     assert abs(state["accumulated_minutes"] - 3.0) < 0.01
 
-    # stop at T=5 (no accumulation, just moves marker)
+    # stop at T=5 → generation took 2m, total=5
     with patch("garlic.engine.time") as mt:
         mt.time.return_value = _at(base, 5)
-        handle_stop(state)
-    assert abs(state["accumulated_minutes"] - 3.0) < 0.01
+        handle_stop(state, config)
+    assert abs(state["accumulated_minutes"] - 5.0) < 0.01
     assert abs(state["last_event_time"] - _at(base, 5)) < 0.01
 
-    # prompt at T=7 → gap measured from stop (T=5), so +2m, total=5
+    # prompt at T=7 → reading/thinking took 2m, total=7
     with patch("garlic.engine.time") as mt:
         mt.time.return_value = _at(base, 7)
         handle_prompt(state, config)
-    assert abs(state["accumulated_minutes"] - 5.0) < 0.01
+    assert abs(state["accumulated_minutes"] - 7.0) < 0.01
 
 
 def test_sequence_multiple_prompts_accumulate():

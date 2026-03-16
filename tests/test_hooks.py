@@ -57,7 +57,8 @@ def test_hook_session_start(monkeypatch):
 
 
 def test_hook_stop(monkeypatch):
-    """stop updates last_event_time without accumulation."""
+    """stop accumulates generation time and updates last_event_time."""
+    now = 1710567900.0
     saved = {}
 
     def fake_save(state):
@@ -67,16 +68,17 @@ def test_hook_stop(monkeypatch):
     monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
     monkeypatch.setattr(
         "garlic.hooks.load_state",
-        lambda rh: _make_state(accumulated_minutes=30.0),
+        # last_event_time 2 minutes ago
+        lambda rh: _make_state(accumulated_minutes=30.0, last_event_time=now - 120),
     )
     monkeypatch.setattr("garlic.hooks.save_state", fake_save)
 
     with patch("garlic.engine.time") as mock_time:
-        mock_time.time.return_value = 1710567900.0
+        mock_time.time.return_value = now
         hook_stop()
 
-    assert saved["last_event_time"] == 1710567900.0
-    assert saved["accumulated_minutes"] == 30.0  # unchanged
+    assert saved["last_event_time"] == now
+    assert abs(saved["accumulated_minutes"] - 32.0) < 0.01  # 30 + 2
 
 
 def test_hook_prompt_no_nudge(monkeypatch, capsys):

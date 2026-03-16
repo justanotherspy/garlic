@@ -39,9 +39,27 @@ def handle_prompt(
     return _check_thresholds(state, config)
 
 
-def handle_stop(state: dict[str, Any]) -> None:
-    """Process a stop event: update last_event_time (no accumulation)."""
-    state["last_event_time"] = time.time()
+def handle_stop(state: dict[str, Any], config: dict[str, Any], debug: bool = False) -> None:
+    """Process a stop event: accumulate generation time and update last_event_time."""
+    now = time.time()
+    last = state.get("last_event_time", 0.0)
+
+    if last > 0:
+        raw_gap = (now - last) / 60.0
+        cap = config["max_prompt_gap_minutes"]
+        gap_minutes = min(raw_gap, cap)
+        state["accumulated_minutes"] += gap_minutes
+
+        if debug:
+            capped = raw_gap > cap
+            print(
+                f"[garlic debug] stop gap: {raw_gap:.2f}m"
+                + (f" → capped to {cap}m" if capped else "")
+                + f" | total: {state['accumulated_minutes']:.2f}m",
+                file=sys.stderr,
+            )
+
+    state["last_event_time"] = now
 
 
 def handle_session_start(state: dict[str, Any]) -> None:
