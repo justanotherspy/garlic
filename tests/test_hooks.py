@@ -1,0 +1,152 @@
+"""Tests for garlic.hooks."""
+
+import io
+import json
+from unittest.mock import patch
+
+from garlic.hooks import hook_prompt, hook_session_start, hook_stop
+
+
+def _make_stdin(data=None):
+    """Create a stdin mock with JSON data."""
+    if data is None:
+        data = {"session_id": "test-123", "cwd": "/tmp"}
+    return io.TextIOWrapper(io.BytesIO(json.dumps(data).encode()))
+
+
+def _make_config(**overrides):
+    config = {
+        "max_prompt_gap_minutes": 10,
+        "reset_hour": 2,
+        "nudge_thresholds_minutes": [60, 120],
+        "nudge_style": "gentle",
+    }
+    config.update(overrides)
+    return config
+
+
+def _make_state(**overrides):
+    state = {
+        "date": "2026-03-16",
+        "accumulated_minutes": 0.0,
+        "last_event_time": 0.0,
+        "nudges_given": [],
+        "ignored": False,
+    }
+    state.update(overrides)
+    return state
+
+
+def test_hook_session_start(monkeypatch):
+    """session-start records timestamp and saves state."""
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr("garlic.hooks.load_state", lambda rh: _make_state())
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = 1710567900.0
+        hook_session_start()
+
+    assert saved["last_event_time"] == 1710567900.0
+
+
+def test_hook_stop(monkeypatch):
+    """stop updates last_event_time without accumulation."""
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(accumulated_minutes=30.0),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = 1710567900.0
+        hook_stop()
+
+    assert saved["last_event_time"] == 1710567900.0
+    assert saved["accumulated_minutes"] == 30.0  # unchanged
+
+
+def test_hook_prompt_no_nudge(monkeypatch, capsys):
+    """prompt accumulates time but no nudge when below threshold."""
+    now = 1710567900.0
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(last_event_time=now - 300),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        hook_prompt()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""  # no nudge
+    assert saved["accumulated_minutes"] > 0
+
+
+def test_hook_prompt_with_nudge(monkeypatch, capsys):
+    """prompt outputs nudge when threshold crossed."""
+    now = 1710567900.0
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(
+            accumulated_minutes=58.0, last_event_time=now - 300
+        ),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        hook_prompt()
+
+    captured = capsys.readouterr()
+    assert len(captured.out.strip()) > 0  # nudge was printed
+
+
+def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
+    """prompt suppresses nudge when ignored=true."""
+    now = 1710567900.0
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(
+            accumulated_minutes=58.0, last_event_time=now - 300, ignored=True
+        ),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", lambda s: None)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        hook_prompt()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""  # nudge suppressed
