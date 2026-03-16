@@ -56,6 +56,42 @@ def test_hook_session_start(monkeypatch):
     assert saved["last_event_time"] == 1710567900.0
 
 
+def test_hook_session_start_shows_status_with_accumulated_time(monkeypatch, capsys):
+    """session-start prints accumulated time when > 0."""
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(accumulated_minutes=95.0),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", lambda s: None)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = 1710567900.0
+        hook_session_start()
+
+    captured = capsys.readouterr()
+    assert "1h 35m" in captured.out
+
+
+def test_hook_session_start_silent_when_no_time(monkeypatch, capsys):
+    """session-start prints nothing when accumulated time is 0."""
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(accumulated_minutes=0.0),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", lambda s: None)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = 1710567900.0
+        hook_session_start()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
 def test_hook_stop(monkeypatch):
     """stop accumulates generation time and updates last_event_time."""
     now = 1710567900.0

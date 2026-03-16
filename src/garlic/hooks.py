@@ -15,8 +15,17 @@ def _read_hook_input() -> dict[str, Any]:
     return json.load(sys.stdin)
 
 
+def _format_time(minutes: float) -> str:
+    """Format minutes as a human-readable time string."""
+    hours = int(minutes // 60)
+    mins = int(minutes % 60)
+    if hours > 0:
+        return f"{hours}h {mins:02d}m"
+    return f"{mins}m"
+
+
 def hook_session_start(debug: bool = False) -> None:
-    """Handle SessionStart hook: record start timestamp."""
+    """Handle SessionStart hook: record start timestamp and show status."""
     _read_hook_input()
     config = load_config()
     state = load_state(config["reset_hour"])
@@ -25,6 +34,10 @@ def hook_session_start(debug: bool = False) -> None:
         print("[garlic debug] session-start: recording timestamp", file=sys.stderr)
     handle_session_start(state)
     save_state(state)
+
+    minutes = state["accumulated_minutes"]
+    if minutes > 0:
+        print(f"🧄 {_format_time(minutes)} of active coding today")
 
 
 def hook_prompt(debug: bool = False) -> None:
