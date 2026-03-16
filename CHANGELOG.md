@@ -6,6 +6,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-03-16
+
 ### Added
 - `garlic set` command to update config values from the CLI
 - `garlic reset` command to reset the daily timer (with confirmation)
@@ -15,7 +17,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 - Expanded nudge message pools from 5 to 15 messages per style
 - CHANGELOG and RELEASING docs
 
-## [0.1.3] - 2026-03-16
+## [0.1.4] - 2026-03-16
 
 ### Added
 - Show garlic status on session start (SessionStart hook)
@@ -25,7 +27,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Increase default `max_prompt_gap_minutes` from 10 to 20
 
-## [0.1.2] - 2026-03-16
+## [0.1.3] - 2026-03-16
 
 ### Added
 - `--debug` flag for hook and setup commands
@@ -35,21 +37,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 - Updated README with time model docs, upgrade instructions, version command
 
-## [0.1.1] - 2026-03-16
+## [0.1.2] - 2026-03-16
 
 ### Added
 - `garlic version` command
 - Makefile with build, clean, test, bump-patch, and publish targets
-- PyPI publish workflow
+
+### Fixed
+- Hook format: `garlic setup` now writes the correct `matcher` + `hooks` envelope format
+- Migrate legacy flat-format hook entries on re-run
 
 ## [0.1.0] - 2026-03-16
 
 ### Added
 - Initial release
+- Time tracking via Claude Code hooks (session-start, prompt, stop)
+- Configurable nudge thresholds with three personalities: gentle, firm, spicy
+- `garlic status` to see daily coding time
+- `garlic ignore` to suppress nudges for the day
 - Config module (`~/.garlic/config.toml`) with defaults
 - State module (`~/.garlic/state.toml`) with file locking
-- Time calculation engine with gap accumulation and threshold checking
-- Nudge message pools (gentle, firm, spicy)
-- CLI commands: `garlic setup`, `garlic status`, `garlic ignore`
-- Hook handlers: session-start, prompt, stop
+- Zero third-party runtime dependencies
 - PyPI packaging with `uv build`
