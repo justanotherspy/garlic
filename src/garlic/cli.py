@@ -1,12 +1,19 @@
 """CLI entry point for garlic."""
 
 import argparse
+import importlib.metadata
 import sys
 
 from garlic.config import load_config
 from garlic.hooks import hook_prompt, hook_session_start, hook_stop
 from garlic.setup import install_hooks
 from garlic.state import load_state, save_state
+
+
+def cmd_version(args: argparse.Namespace) -> None:
+    """Print the installed version."""
+    version = importlib.metadata.version("garlic-cli")
+    print(f"garlic {version}")
 
 
 def cmd_setup(args: argparse.Namespace) -> None:
@@ -71,6 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser("version", help="Show installed version")
     sub.add_parser("setup", help="Install hooks into ~/.claude/settings.json")
     sub.add_parser("status", help="Show accumulated active time today")
     sub.add_parser("ignore", help="Disable nudging for the day")
@@ -94,6 +102,7 @@ def main() -> None:
         sys.exit(1)
 
     dispatch = {
+        "version": cmd_version,
         "setup": cmd_setup,
         "status": cmd_status,
         "ignore": cmd_ignore,
