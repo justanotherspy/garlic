@@ -67,7 +67,7 @@ Edit `~/.garlic/config.toml` to customize:
 # Max time (minutes) to attribute to a single gap between events.
 # If you step away for an hour, garlic assumes you spent this many
 # minutes getting back up to speed rather than counting the full gap.
-max_prompt_gap_minutes = 10
+max_prompt_gap_minutes = 20
 
 # Hour of day (0-23) when the daily timer resets.
 reset_hour = 2

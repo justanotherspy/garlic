@@ -8,7 +8,7 @@ GARLIC_DIR = Path.home() / ".garlic"
 CONFIG_PATH = GARLIC_DIR / "config.toml"
 
 DEFAULTS: dict[str, Any] = {
-    "max_prompt_gap_minutes": 10,
+    "max_prompt_gap_minutes": 20,
     "reset_hour": 2,
     "nudge_thresholds_minutes": [60, 120, 180, 240],
     "nudge_style": "gentle",

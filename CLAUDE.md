@@ -32,7 +32,7 @@ Garlic tracks how much time a user spends actively coding with Claude Code each 
 
 ### Config defaults (`~/.garlic/config.toml`)
 ```toml
-max_prompt_gap_minutes = 10
+max_prompt_gap_minutes = 20
 reset_hour = 2
 nudge_thresholds_minutes = [60, 120, 180, 240]
 nudge_style = "gentle"
