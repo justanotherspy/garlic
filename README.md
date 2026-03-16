@@ -1,4 +1,4 @@
-# Garlic 🧄 - the AI Vampire 🧛 Warding Tool
+# Garlic 🧄 — the AI Vampire 🧛 Warding Tool
 
 Garlic is used to ward off vampires. According to Steve Yegge, AI tools have a vampiric effect on us, draining us of energy and making us tired and exhausted. Not because they are not good at coding, or do not make us much more productive, but simply because we get dopamine for getting stuff done quicker, leading us to work longer and think harder. In short, we need to touch grass. Instead of going hard for 12 hours straight with our coding agent of choice and burning ourselves out to only create value for our employer, we should be mindful of the $/hr formula and consider a new balance. He estimates there are no more than 3-4 hours of good work that we can do in a day with all this uplift without burning our own candles a little too brightly. As someone quite sensitive to the effects of extended dopamine release on the mind and body, I tend to agree with him. So I created `garlic`, a CLI tool that helps you keep the draining to a minimum and maintain your own energy levels so we can continue to be healthy little worker bees for years to come.
 
@@ -6,24 +6,75 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 ## How does it work?
 
-`garlic` plugs into your coding agent ecosystem using hooks. It tracks when you start your coding work for the day and keeps an eye on how long you have been Claudling. As you start reaching the 3-4 hour mark it gently gets your agent to nudge you to maybe consider a break or even calling it for the day. It is highly customizable so that you can configure exactly when, how often, and how aggressively it nudges you. It is all based on hooks calling the `garlic` CLI which maintains a session log in your home directory. This is used to estimate how much you have been working in the day and has nothing to do with your usage limits in your agent of choice. Just because our usage limit says Go Go Go, does not mean it is good for us!
+`garlic` hooks into Claude Code using its [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks). It tracks three events:
 
-## Okay, how do I set it up?
+- **Session start** — when you open a new Claude Code session
+- **Prompt submit** — when you send a message to Claude
+- **Stop** — when Claude finishes responding
 
-First you install `garlic` with `uv`:
+From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
+
+The time model is simple: each time you submit a prompt, garlic looks at the gap since the last event. If the gap is short (under 10 minutes by default), it counts the full gap as active time. If the gap is long (you went for a walk, had lunch, etc.), it assumes you spent about 10 minutes getting back up to speed. This keeps the estimate honest without needing to spy on your screen.
+
+As you approach configurable thresholds (1 hour, 2 hours, etc.), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt.
+
+## Setup
+
+Install garlic with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv tool install garlic
 ```
 
-Then you run `garlic setup` to configure it. It will create the hooks needed to connect to your session and prompts across all your projects. A `.garlic.yaml` config file is created in your home directory to control how garlic is set up.
+Run setup to install the Claude Code hooks:
 
-You can run `garlic status` at any time to see how long you have been Claudling today (resets at 2am by default but can be changed).
+```bash
+garlic setup
+```
 
-You can run `garlic ignore` to pause the tracking for the day so it will not annoy you for just this one day.
+This does two things:
+1. Creates `~/.garlic/config.toml` with sensible defaults
+2. Adds garlic's hooks to `~/.claude/settings.json` so they run across all your projects
+
+Setup is idempotent — safe to run again if you need to repair or update hooks.
+
+## Usage
+
+```bash
+# See how long you have been Clauding today
+garlic status
+
+# Disable nudging for the rest of the day (tracking continues)
+garlic ignore
+```
+
+## Configuration
+
+Edit `~/.garlic/config.toml` to customize:
+
+```toml
+# Max time (minutes) to attribute to a single gap between events.
+# If you step away for an hour, garlic assumes you spent this many
+# minutes getting back up to speed rather than counting the full gap.
+max_prompt_gap_minutes = 10
+
+# Hour of day (0-23) when the daily timer resets.
+reset_hour = 2
+
+# Accumulated minutes at which garlic will nudge you.
+# Each threshold fires only once per day.
+nudge_thresholds_minutes = [60, 120, 180, 240]
+
+# Nudge personality: "gentle", "firm", or "spicy".
+nudge_style = "gentle"
+```
 
 ## Things I should know?
 
-The outputs from the `garlic hook` command, which are run by the hooks, are hardcoded in the project so there is no risk of it being used to prompt inject anything other than a gentle nudge for the agent to pass on to the user. You can audit the outputs here in the project.
+**No prompt injection risk.** The nudge messages output by garlic's hooks are hardcoded in the project. There is no mechanism for external input to influence what gets sent to your agent. You can audit every possible message in [`src/garlic/nudges.py`](src/garlic/nudges.py).
 
-I built this with Claude, and the idea was to keep garlic performant and use the standard Python library as much as possible to prevent any supply chain risks being introduced.
+**No third-party dependencies.** Garlic uses only the Python standard library. This is an intentional choice — it runs on every prompt you send, so the supply chain should be as small and auditable as possible.
+
+**No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere.
+
+**Built with Claude.** This project was built with Claude Code, which is fitting given what it does.
