@@ -1,4 +1,4 @@
-.PHONY: help build clean test
+.PHONY: help build clean test bump-patch publish
 
 help:
 	@echo "Available targets:"
@@ -6,6 +6,7 @@ help:
 	@echo "  clean       - Remove dist/"
 	@echo "  test        - Run tests"
 	@echo "  bump-patch  - Increment patch version in pyproject.toml"
+	@echo "  publish     - Clean, build, and upload to PyPI"
 
 build:
 	uv build
@@ -18,3 +19,6 @@ test:
 
 bump-patch:
 	uv version --bump patch
+
+publish: clean build
+	uv run twine upload dist/*
