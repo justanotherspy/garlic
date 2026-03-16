@@ -14,9 +14,15 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
-The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 10 minutes by default — if you step away for an hour, garlic assumes you spent about 10 minutes getting back up to speed rather than counting the full absence. This keeps the estimate honest without needing to spy on your screen.
+The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 20 minutes by default — if you step away for an hour, garlic assumes you spent about 20 minutes getting back up to speed rather than counting the full absence. This keeps the estimate honest without needing to spy on your screen.
 
 As you approach configurable thresholds (1 hour, 2 hours, etc.), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt.
+
+## Compatibility
+
+- Python 3.11+
+- macOS, Linux, and WSL
+- Not supported on native Windows (`fcntl` is unavailable)
 
 ## Setup
 
