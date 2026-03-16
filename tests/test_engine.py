@@ -1,6 +1,5 @@
 """Tests for garlic.engine."""
 
-import time
 from unittest.mock import patch
 
 from garlic.engine import handle_prompt, handle_session_start, handle_stop
@@ -141,3 +140,121 @@ def test_handle_session_start_records_timestamp():
         handle_session_start(state)
 
     assert state["last_event_time"] == now
+
+
+# ---------------------------------------------------------------------------
+# Multi-event sequence tests
+# ---------------------------------------------------------------------------
+
+def _at(base, minutes):
+    """Return a timestamp that is `minutes` after `base`."""
+    return base + minutes * 60
+
+
+def test_sequence_prompt_stop_prompt():
+    """Stop moves the marker; next prompt measures gap from stop, not prior prompt."""
+    base = 1710567900.0
+    config = _make_config()
+
+    # session-start at T=0
+    state = _make_state()
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 0)
+        handle_session_start(state)
+
+    # prompt at T=3 → gap 3m, total=3
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 3)
+        handle_prompt(state, config)
+    assert abs(state["accumulated_minutes"] - 3.0) < 0.01
+
+    # stop at T=5 (no accumulation, just moves marker)
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 5)
+        handle_stop(state)
+    assert abs(state["accumulated_minutes"] - 3.0) < 0.01
+    assert abs(state["last_event_time"] - _at(base, 5)) < 0.01
+
+    # prompt at T=7 → gap measured from stop (T=5), so +2m, total=5
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 7)
+        handle_prompt(state, config)
+    assert abs(state["accumulated_minutes"] - 5.0) < 0.01
+
+
+def test_sequence_multiple_prompts_accumulate():
+    """Several back-to-back prompts accumulate correctly."""
+    base = 1710567900.0
+    config = _make_config()
+    state = _make_state(last_event_time=base)
+
+    gaps = [2, 4, 3, 5]  # minutes between prompts
+    expected_total = sum(gaps)  # all under cap
+
+    t = base
+    for gap in gaps:
+        t += gap * 60
+        with patch("garlic.engine.time") as mt:
+            mt.time.return_value = t
+            handle_prompt(state, config)
+
+    assert abs(state["accumulated_minutes"] - expected_total) < 0.01
+
+
+def test_sequence_gap_exceeding_cap_then_normal():
+    """A capped gap followed by a normal gap accumulates correctly."""
+    base = 1710567900.0
+    config = _make_config(max_prompt_gap_minutes=10)
+    state = _make_state(last_event_time=base)
+
+    # 30-minute gap → capped to 10
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 30)
+        handle_prompt(state, config)
+    assert abs(state["accumulated_minutes"] - 10.0) < 0.01
+
+    # 4-minute gap → added in full
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 34)
+        handle_prompt(state, config)
+    assert abs(state["accumulated_minutes"] - 14.0) < 0.01
+
+
+def test_all_thresholds_fire_in_order():
+    """Each threshold fires exactly once as time accumulates past each one."""
+    base = 1710567900.0
+    # cap set above 65 so gaps are not truncated
+    config = _make_config(nudge_thresholds_minutes=[60, 120, 180, 240], max_prompt_gap_minutes=70)
+    state = _make_state(last_event_time=base)
+
+    fired = []
+    # Drive time in 65-minute chunks (each crosses exactly one new threshold)
+    for i in range(1, 5):
+        with patch("garlic.engine.time") as mt:
+            mt.time.return_value = _at(base, i * 65)
+            result = handle_prompt(state, config)
+        if result is not None:
+            fired.append(result)
+
+    assert fired == [60, 120, 180, 240]
+    assert state["nudges_given"] == [60, 120, 180, 240]
+
+
+def test_threshold_not_refired_after_crossing():
+    """Once a threshold is in nudges_given, it is never returned again."""
+    base = 1710567900.0
+    config = _make_config(nudge_thresholds_minutes=[60])
+    state = _make_state(accumulated_minutes=59.0, last_event_time=base)
+
+    # First prompt crosses 60
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 2)
+        r1 = handle_prompt(state, config)
+    assert r1 == 60
+
+    # Second prompt stays above 60 but threshold already given
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 4)
+        r2 = handle_prompt(state, config)
+    assert r2 is None
+    assert state["nudges_given"].count(60) == 1  # recorded only once

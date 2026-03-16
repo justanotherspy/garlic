@@ -1,5 +1,6 @@
 """Tests for garlic.state."""
 
+import threading
 import tomllib
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -86,6 +87,40 @@ def test_load_state_resets_on_new_day(tmp_path, monkeypatch):
     assert state["accumulated_minutes"] == 0.0
     assert state["nudges_given"] == []
     assert state["ignored"] is False
+
+
+def test_concurrent_saves_dont_corrupt(tmp_path, monkeypatch):
+    """Concurrent save_state calls from multiple threads produce valid TOML."""
+    state_path = tmp_path / "state.toml"
+    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
+    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
+
+    errors = []
+
+    def writer(minutes):
+        try:
+            save_state({
+                "date": "2026-03-16",
+                "accumulated_minutes": float(minutes),
+                "last_event_time": 1710567890.0,
+                "nudges_given": [],
+                "ignored": False,
+            })
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [], f"Errors during concurrent writes: {errors}"
+
+    # File must be valid TOML after all writes
+    with state_path.open("rb") as f:
+        loaded = tomllib.load(f)
+    assert "accumulated_minutes" in loaded
 
 
 def test_save_state_roundtrip(tmp_path, monkeypatch):
