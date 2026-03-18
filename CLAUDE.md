@@ -21,6 +21,12 @@
 - Keep tests fast; avoid network calls in unit tests.
 - Add pytest as a dev dependency: `uv add --dev pytest`
 
+## CI / Pull Request workflow
+- CI runs automatically on every PR and push to `main` via `.github/workflows/ci.yml`.
+- It runs `uv sync` then `uv run pytest` against Python 3.11 and 3.12.
+- All PRs should be opened against `main`. The PR template (`.github/pull_request_template.md`) will pre-fill with a summary, test plan, and checklist.
+- Do not merge a PR until CI is green.
+
 ## Architecture
 
 ### What garlic does
