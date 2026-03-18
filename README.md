@@ -14,9 +14,9 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
-The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 20 minutes by default — if you step away for an hour, garlic assumes you spent about 20 minutes getting back up to speed rather than counting the full absence. This keeps the estimate honest without needing to spy on your screen.
+The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 40 minutes by default — if you step away for a while, garlic counts up to 40 minutes of that gap rather than ignoring it entirely. The cap is intentionally generous: it covers the time you spend getting back into context, but also accounts for adjacent work that's still part of your coding session — reading docs, answering a Slack message, checking email, or browsing. If the cap is too short, garlic undercounts your thinking time and gives you a false sense of how long you've really been at it.
 
-As you approach configurable thresholds (1 hour, 2 hours, etc.), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt.
+As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
 ## Compatibility
 
@@ -71,16 +71,17 @@ Edit `~/.garlic/config.toml` to customize:
 
 ```toml
 # Max time (minutes) to attribute to a single gap between events.
-# If you step away for an hour, garlic assumes you spent this many
+# If you step away for a while, garlic assumes you spent this many
 # minutes getting back up to speed rather than counting the full gap.
-max_prompt_gap_minutes = 20
+max_prompt_gap_minutes = 40
 
 # Hour of day (0-23) when the daily timer resets.
 reset_hour = 2
 
 # Accumulated minutes at which garlic will nudge you.
-# Each threshold fires only once per day.
-nudge_thresholds_minutes = [60, 120, 180, 240]
+# Each threshold fires only once per day. The final threshold uses
+# a more definitive "session over" message.
+nudge_thresholds_minutes = [30, 60, 90, 120, 150, 180, 210, 240]
 
 # Nudge personality: "gentle", "firm", or "spicy".
 nudge_style = "gentle"
