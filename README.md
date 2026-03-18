@@ -14,7 +14,7 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
-The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 40 minutes by default — if you step away for a while, garlic assumes you spent about 40 minutes getting back up to speed rather than counting the full absence. This keeps the estimate honest without needing to spy on your screen.
+The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. Each gap is capped at 40 minutes by default — if you step away for a while, garlic counts up to 40 minutes of that gap rather than ignoring it entirely. The cap is intentionally generous: it covers the time you spend getting back into context, but also accounts for adjacent work that's still part of your coding session — reading docs, answering a Slack message, checking email, or browsing. If the cap is too short, garlic undercounts your thinking time and gives you a false sense of how long you've really been at it.
 
 As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
