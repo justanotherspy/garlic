@@ -25,6 +25,7 @@
 - CI runs automatically on every PR and push to `main` via `.github/workflows/ci.yml`.
 - It runs `uv sync` then `uv run pytest` against Python 3.11 and 3.12.
 - All PRs should be opened against `main`. The PR template (`.github/pull_request_template.md`) will pre-fill with a summary, test plan, and checklist.
+- **Before opening a PR**: update `README.md` if any user-facing behaviour, defaults, or commands changed.
 - Do not merge a PR until CI is green.
 
 ## Architecture
