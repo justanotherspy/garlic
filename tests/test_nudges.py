@@ -1,6 +1,6 @@
 """Tests for garlic.nudges."""
 
-from garlic.nudges import POOLS, _format_time, get_nudge
+from garlic.nudges import FINAL, POOLS, _format_time, get_nudge
 
 
 def test_format_time_minutes():
@@ -33,7 +33,16 @@ def test_get_nudge_unknown_style_falls_back_to_gentle():
     assert "~1 hour" in msg
 
 
+def test_get_nudge_is_final_uses_final_pool():
+    # Run several times to confirm it always comes from FINAL
+    for _ in range(20):
+        msg = get_nudge("gentle", 240, is_final=True)
+        assert any(msg == m.format(time="~4 hours") for m in FINAL)
+
+
 def test_all_pool_messages_have_placeholder():
     for style, pool in POOLS.items():
         for msg in pool:
             assert "{time}" in msg, f"Missing {{time}} in {style}: {msg}"
+    for msg in FINAL:
+        assert "{time}" in msg, f"Missing {{time}} in FINAL: {msg}"

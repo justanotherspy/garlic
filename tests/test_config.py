@@ -38,7 +38,7 @@ def test_load_config_reads_existing(tmp_path, monkeypatch):
     assert config["nudge_style"] == "spicy"
     # Defaults still present for unspecified keys
     assert config["max_prompt_gap_minutes"] == 40
-    assert config["nudge_thresholds_minutes"] == [60, 120, 180, 240]
+    assert config["nudge_thresholds_minutes"] == [30, 60, 90, 120, 150, 180, 210, 240]
 
 
 def test_load_config_user_overrides_all(tmp_path, monkeypatch):
