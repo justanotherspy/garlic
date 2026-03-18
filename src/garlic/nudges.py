@@ -56,6 +56,19 @@ SPICY = [
     "{time} of letting an AI do your thinking. Go think your own thoughts for a bit.",
 ]
 
+FINAL = [
+    "That's {time} today. Time's up — close the laptop and step away.",
+    "You've hit {time}. That's your lot for today. Shut it down.",
+    "{time}. Session over. The code will still be there tomorrow.",
+    "You've done {time} today. Seriously, that's enough. Close it.",
+    "{time} of coding. Your brain is full. Log off.",
+    "That's {time}. You're done for today — no negotiating with yourself.",
+    "{time} logged. Laptop lid down. You've earned it.",
+    "Hard stop: {time}. Walk away from the keyboard. You're done.",
+    "{time} today. This is not a suggestion — wrap it up.",
+    "Final nudge: {time}. The work will keep. You need to stop.",
+]
+
 POOLS = {
     "gentle": GENTLE,
     "firm": FIRM,
@@ -74,9 +87,12 @@ def _format_time(minutes: float) -> str:
     return f"~{round(hours)} hours"
 
 
-def get_nudge(style: str, accumulated_minutes: float) -> str:
-    """Pick a random nudge message from the given style pool."""
-    pool = POOLS.get(style, GENTLE)
+def get_nudge(style: str, accumulated_minutes: float, is_final: bool = False) -> str:
+    """Pick a random nudge message from the given style pool.
+
+    If is_final is True, always uses the FINAL pool regardless of style.
+    """
+    pool = FINAL if is_final else POOLS.get(style, GENTLE)
     time_str = _format_time(accumulated_minutes)
     message = random.choice(pool)
     return message.format(time=time_str)

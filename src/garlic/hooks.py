@@ -49,7 +49,9 @@ def hook_prompt(debug: bool = False) -> None:
     save_state(state)
 
     if threshold is not None and not state.get("ignored", False):
-        nudge = get_nudge(config["nudge_style"], state["accumulated_minutes"])
+        thresholds = config.get("nudge_thresholds_minutes", [])
+        is_final = thresholds and threshold == max(thresholds)
+        nudge = get_nudge(config["nudge_style"], state["accumulated_minutes"], is_final=is_final)
         print(nudge)
 
 
