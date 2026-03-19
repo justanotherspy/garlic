@@ -14,7 +14,7 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
-The time model counts your full engagement cycle: the time Claude spends generating a response, plus the time you spend reading it and thinking before your next prompt. If any gap between events exceeds 40 minutes (configurable), garlic assumes you stepped away and counts nothing for that gap. Gaps within the limit are counted in full. The limit is intentionally generous: it covers the time you spend reading docs, answering a Slack message, checking email, or getting back into context — adjacent work that's still part of your coding session.
+The time model counts your full engagement cycle: the time Claude spends generating a response (always counted in full, no matter how long), plus the time you spend reading it and thinking before your next prompt. If your thinking time exceeds 40 minutes (configurable), garlic assumes you stepped away and counts nothing for that gap. Gaps within the limit are counted in full. The limit is intentionally generous: it covers the time you spend reading docs, answering a Slack message, checking email, or getting back into context — adjacent work that's still part of your coding session.
 
 As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
@@ -72,9 +72,10 @@ garlic ignore
 Edit `~/.garlic/config.toml` to customize:
 
 ```toml
-# Max gap (minutes) between events that still counts as active coding.
-# If a gap exceeds this, garlic assumes you stepped away and counts
-# nothing for that gap. Gaps within the limit are counted in full.
+# Max thinking time (minutes) between Claude stopping and your next
+# prompt that still counts as active coding. If you take longer than
+# this, garlic assumes you stepped away and counts nothing for that gap.
+# Claude's generation time is always counted in full regardless of this.
 max_prompt_gap_minutes = 40
 
 # Hour of day (0-23) when the daily timer resets.
