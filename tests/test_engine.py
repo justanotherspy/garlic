@@ -41,8 +41,8 @@ def test_handle_prompt_accumulates_time():
     assert state["last_event_time"] == now
 
 
-def test_handle_prompt_caps_large_gap():
-    """Gaps larger than max_prompt_gap_minutes are capped."""
+def test_handle_prompt_drops_large_gap():
+    """Gaps larger than max_prompt_gap_minutes are dropped (user was away)."""
     now = 1710567900.0
     # Last event was 30 minutes ago
     state = _make_state(last_event_time=now - 1800)
@@ -52,7 +52,7 @@ def test_handle_prompt_caps_large_gap():
         mock_time.time.return_value = now
         handle_prompt(state, config)
 
-    assert abs(state["accumulated_minutes"] - 10.0) < 0.01
+    assert state["accumulated_minutes"] == 0.0
 
 
 def test_handle_prompt_first_event_no_accumulation():
@@ -132,8 +132,8 @@ def test_handle_stop_accumulates_generation_time():
     assert abs(state["accumulated_minutes"] - 33.0) < 0.01  # 30 + 3
 
 
-def test_handle_stop_caps_long_generation():
-    """Stop caps gap at max_prompt_gap_minutes like prompt does."""
+def test_handle_stop_counts_long_generation_in_full():
+    """Stop always counts generation time in full (no cap)."""
     now = 1710567900.0
     state = _make_state(accumulated_minutes=0.0, last_event_time=now - 3600)
     config = _make_config(max_prompt_gap_minutes=10)
@@ -142,7 +142,7 @@ def test_handle_stop_caps_long_generation():
         mock_time.time.return_value = now
         handle_stop(state, config)
 
-    assert abs(state["accumulated_minutes"] - 10.0) < 0.01
+    assert abs(state["accumulated_minutes"] - 60.0) < 0.01  # full 60 minutes
 
 
 def test_handle_stop_no_accumulation_without_last_event():
@@ -231,22 +231,22 @@ def test_sequence_multiple_prompts_accumulate():
 
 
 def test_sequence_gap_exceeding_cap_then_normal():
-    """A capped gap followed by a normal gap accumulates correctly."""
+    """A dropped gap followed by a normal gap accumulates correctly."""
     base = 1710567900.0
     config = _make_config(max_prompt_gap_minutes=10)
     state = _make_state(last_event_time=base)
 
-    # 30-minute gap → capped to 10
+    # 30-minute gap → dropped (exceeded cap, user was away)
     with patch("garlic.engine.time") as mt:
         mt.time.return_value = _at(base, 30)
         handle_prompt(state, config)
-    assert abs(state["accumulated_minutes"] - 10.0) < 0.01
+    assert state["accumulated_minutes"] == 0.0
 
     # 4-minute gap → added in full
     with patch("garlic.engine.time") as mt:
         mt.time.return_value = _at(base, 34)
         handle_prompt(state, config)
-    assert abs(state["accumulated_minutes"] - 14.0) < 0.01
+    assert abs(state["accumulated_minutes"] - 4.0) < 0.01
 
 
 def test_all_thresholds_fire_in_order():

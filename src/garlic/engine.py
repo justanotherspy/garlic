@@ -19,14 +19,14 @@ def handle_prompt(
     if last > 0:
         raw_gap = (now - last) / 60.0
         cap = config["max_prompt_gap_minutes"]
-        gap_minutes = min(raw_gap, cap)
+        gap_minutes = raw_gap if raw_gap <= cap else 0.0
         state["accumulated_minutes"] += gap_minutes
 
         if debug:
-            capped = raw_gap > cap
+            dropped = raw_gap > cap
             print(
                 f"[garlic debug] gap: {raw_gap:.2f}m"
-                + (f" → capped to {cap}m" if capped else "")
+                + (f" → dropped (exceeded {cap}m cap)" if dropped else "")
                 + f" | total: {state['accumulated_minutes']:.2f}m",
                 file=sys.stderr,
             )
@@ -41,21 +41,21 @@ def handle_prompt(
 
 
 def handle_stop(state: dict[str, Any], config: dict[str, Any], debug: bool = False) -> None:
-    """Process a stop event: accumulate generation time and update last_event_time."""
+    """Process a stop event: accumulate generation time and update last_event_time.
+
+    Generation time is always counted in full (no cap) — Claude responding
+    is unambiguously active coding time.
+    """
     now = time.time()
     last = state.get("last_event_time", 0.0)
 
     if last > 0:
-        raw_gap = (now - last) / 60.0
-        cap = config["max_prompt_gap_minutes"]
-        gap_minutes = min(raw_gap, cap)
+        gap_minutes = (now - last) / 60.0
         state["accumulated_minutes"] += gap_minutes
 
         if debug:
-            capped = raw_gap > cap
             print(
-                f"[garlic debug] stop gap: {raw_gap:.2f}m"
-                + (f" → capped to {cap}m" if capped else "")
+                f"[garlic debug] stop gap: {gap_minutes:.2f}m"
                 + f" | total: {state['accumulated_minutes']:.2f}m",
                 file=sys.stderr,
             )
