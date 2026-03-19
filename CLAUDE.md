@@ -75,8 +75,8 @@ When `date` doesn't match the current day (accounting for `reset_hour`), state r
 
 ### Time tracking model
 - **Session start**: record timestamp as `last_event_time`
-- **Stop** (Claude finishes responding): compute gap = now − `last_event_time` (generation time). If gap exceeds `max_prompt_gap_minutes`, drop it (count 0 — user was away). Otherwise add to `accumulated_minutes`. Update `last_event_time` to now.
-- **Prompt**: compute gap = now − `last_event_time` (reading/thinking time since Claude stopped). If gap exceeds `max_prompt_gap_minutes`, drop it (count 0). Otherwise add to `accumulated_minutes`. Check thresholds; if a new one is crossed and not already in `nudges_given` and not `ignored`, output a nudge message to stdout and record the threshold.
+- **Stop** (Claude finishes responding): compute gap = now − `last_event_time` (generation time). Always counted in full — generation time is unambiguously active coding. Add to `accumulated_minutes`. Update `last_event_time` to now.
+- **Prompt**: compute gap = now − `last_event_time` (reading/thinking time since Claude stopped). If gap exceeds `max_prompt_gap_minutes`, drop it (count 0 — user was away). Otherwise add to `accumulated_minutes`. Check thresholds; if a new one is crossed and not already in `nudges_given` and not `ignored`, output a nudge message to stdout and record the threshold.
 
 Both stop and prompt accumulate time — the full engagement cycle is counted: watching Claude generate + reading the response + thinking before the next prompt.
 

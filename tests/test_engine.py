@@ -132,8 +132,8 @@ def test_handle_stop_accumulates_generation_time():
     assert abs(state["accumulated_minutes"] - 33.0) < 0.01  # 30 + 3
 
 
-def test_handle_stop_drops_long_generation():
-    """Stop drops gap when it exceeds max_prompt_gap_minutes."""
+def test_handle_stop_counts_long_generation_in_full():
+    """Stop always counts generation time in full (no cap)."""
     now = 1710567900.0
     state = _make_state(accumulated_minutes=0.0, last_event_time=now - 3600)
     config = _make_config(max_prompt_gap_minutes=10)
@@ -142,7 +142,7 @@ def test_handle_stop_drops_long_generation():
         mock_time.time.return_value = now
         handle_stop(state, config)
 
-    assert state["accumulated_minutes"] == 0.0
+    assert abs(state["accumulated_minutes"] - 60.0) < 0.01  # full 60 minutes
 
 
 def test_handle_stop_no_accumulation_without_last_event():
