@@ -4,7 +4,14 @@ import argparse
 import importlib.metadata
 from unittest.mock import patch
 
-from garlic.cli import _prompt_config, build_parser, cmd_setup, cmd_version
+from garlic.cli import (
+    _check_latest_version,
+    _parse_version,
+    _prompt_config,
+    build_parser,
+    cmd_setup,
+    cmd_version,
+)
 
 
 def test_parser_version():
@@ -14,10 +21,61 @@ def test_parser_version():
 
 
 def test_cmd_version_output(capsys):
-    cmd_version(None)
+    """Version prints current version; update check is silent when no update."""
+    with patch("garlic.cli._check_latest_version", return_value=None):
+        cmd_version(None)
     out = capsys.readouterr().out.strip()
     expected = f"garlic {importlib.metadata.version('garlic-cli')}"
     assert out == expected
+
+
+def test_cmd_version_shows_update(capsys):
+    """When a newer version exists, prints upgrade suggestion."""
+    with patch("garlic.cli._check_latest_version", return_value="99.0.0"):
+        cmd_version(None)
+    out = capsys.readouterr().out
+    assert "update available: 99.0.0" in out
+    assert "uv tool upgrade garlic-cli" in out
+
+
+def test_parse_version():
+    assert _parse_version("1.2.3") == (1, 2, 3)
+    assert _parse_version("0.1.0") < _parse_version("0.2.0")
+    assert _parse_version("1.0.0") > _parse_version("0.99.99")
+
+
+def test_check_latest_version_network_failure():
+    """Network errors return None silently."""
+    with patch("urllib.request.urlopen", side_effect=OSError("no network")):
+        assert _check_latest_version("0.1.0") is None
+
+
+def test_check_latest_version_newer():
+    """Returns latest version string when PyPI has a newer release."""
+    import io
+    import json
+
+    payload = json.dumps({"info": {"version": "99.0.0"}}).encode()
+    mock_resp = io.BytesIO(payload)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = lambda s, *a: None
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        assert _check_latest_version("0.1.0") == "99.0.0"
+
+
+def test_check_latest_version_not_newer():
+    """Returns None when installed version is current."""
+    import io
+    import json
+
+    payload = json.dumps({"info": {"version": "0.1.0"}}).encode()
+    mock_resp = io.BytesIO(payload)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = lambda s, *a: None
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        assert _check_latest_version("0.1.0") is None
 
 
 def test_parser_setup():

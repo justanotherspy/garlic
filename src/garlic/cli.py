@@ -10,10 +10,48 @@ from garlic.setup import install_hooks
 from garlic.state import load_state, save_state
 
 
+def _check_latest_version(current: str) -> str | None:
+    """Fetch the latest garlic-cli version from PyPI. Returns it if newer, else None."""
+    import json as _json
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            "https://pypi.org/pypi/garlic-cli/json",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = _json.loads(resp.read())
+        latest = data["info"]["version"]
+        if _parse_version(latest) > _parse_version(current):
+            return latest
+    except Exception:
+        pass
+    return None
+
+
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse a PEP 440-ish version string into a comparable tuple."""
+    parts: list[int] = []
+    for seg in v.split("."):
+        digits = ""
+        for ch in seg:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
 def cmd_version(args: argparse.Namespace) -> None:
-    """Print the installed version."""
+    """Print the installed version and check for updates."""
     version = importlib.metadata.version("garlic-cli")
     print(f"garlic {version}")
+    latest = _check_latest_version(version)
+    if latest:
+        print(f"  update available: {latest}")
+        print(f"  run: uv tool upgrade garlic-cli")
 
 
 def _prompt_config() -> dict[str, object]:
