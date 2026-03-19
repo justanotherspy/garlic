@@ -14,7 +14,7 @@ CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"
 
 _GARLIC_CLAUDE_MD_BLOCK = """\
 ## garlic
-If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it.
+If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
 """
 
 GARLIC_COMMAND = "Run `garlic status` and show the output to me.\n"
