@@ -1,6 +1,7 @@
 """Tests for garlic.setup."""
 
 import json
+from unittest.mock import patch
 
 from garlic.setup import install_hooks
 
@@ -70,3 +71,23 @@ def test_install_hooks_preserves_other_hooks(tmp_path, monkeypatch):
     assert prompt_hooks[0]["command"] == "other-tool do-stuff"
     assert prompt_hooks[1]["hooks"][0]["command"] == "garlic hook prompt"
     assert settings["other_setting"] is True
+
+
+def test_install_hooks_atomic_preserves_file_on_write_failure(tmp_path, monkeypatch):
+    """If the write fails, the original settings.json is untouched."""
+    settings_path = tmp_path / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    original = {"permissions": {"allow": ["Bash"]}, "hooks": {}}
+    original_text = json.dumps(original, indent=2) + "\n"
+    settings_path.write_text(original_text)
+    monkeypatch.setattr("garlic.setup.CLAUDE_SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("garlic.setup.load_config", lambda: {})
+
+    with patch("garlic.setup.os.replace", side_effect=OSError("disk full")):
+        try:
+            install_hooks()
+        except OSError:
+            pass
+
+    # Original file must be intact
+    assert settings_path.read_text() == original_text

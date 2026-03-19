@@ -1,6 +1,8 @@
 """Install/update garlic hooks in ~/.claude/settings.json."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +39,26 @@ def _is_garlic_entry(entry: dict[str, Any]) -> bool:
     )
 
 
+def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
+    """Write JSON to *path* atomically via temp-file + rename."""
+    content = json.dumps(data, indent=2) + "\n"
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        os.write(fd, content.encode())
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, path)  # atomic on POSIX
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def install_hooks(debug: bool = False) -> None:
     """Install garlic hooks into ~/.claude/settings.json (idempotent)."""
     # Ensure config exists
@@ -65,7 +87,7 @@ def install_hooks(debug: bool = False) -> None:
         }
         event_hooks.append(entry)
 
-    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+    _atomic_write_json(settings_path, settings)
 
     # Install /garlic slash command globally
     install_slash_command()
