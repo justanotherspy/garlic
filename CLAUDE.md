@@ -21,12 +21,53 @@
 - Keep tests fast; avoid network calls in unit tests.
 - Add pytest as a dev dependency: `uv add --dev pytest`
 
-## CI / Pull Request workflow
+## Commit messages
+
+Use **Conventional Commits** format. This is required — `git-cliff` parses commit messages to generate the changelog automatically.
+
+```
+<type>(<scope>): <description>
+```
+
+Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `perf`, `style`
+
+Examples:
+- `feat(setup): add --defaults flag to overwrite config`
+- `fix(engine): drop gaps exceeding cap`
+- `docs: update README with new defaults`
+- `chore(release): v0.1.7` (used only by `make release`)
+
+Include the bead ID in the description when working on a bead (e.g. `feat(setup): add interactive prompts (garlic-v5k)`).
+
+## Development workflow (bead → PR → merge)
+
+1. **Claim the bead**: `bd update <id> --status=in_progress`
+2. **Ensure main is up to date**: `git checkout main && git pull`
+3. **Create a feature branch**: `git checkout -b <bead-id>/<short-description>`
+4. **Implement, test, commit** using conventional commit messages. Update `README.md` if any user-facing behaviour changed.
+5. **Push and open a PR**: branch name and PR title must include the bead ID (e.g. `garlic-abc`). One bead per PR.
+6. **PR description** must have two sections: **Goal** (the problem/feature from the bead) and **Solution** (how it was implemented).
+7. **Wait for CI** — do not merge until green.
+8. **After the user confirms the PR is merged**: `bd close <id> --reason="PR #N merged"`, then `git checkout main && git pull`.
+
+**Never push code directly to main.** The only exception is `make release`, which pushes release metadata (changelog, version bump) directly.
+
+## CI
 - CI runs automatically on every PR and push to `main` via `.github/workflows/ci.yml`.
 - It runs `uv sync` then `uv run pytest` against Python 3.11 and 3.12.
-- All PRs should be opened against `main`. The PR template (`.github/pull_request_template.md`) will pre-fill with a summary, test plan, and checklist.
-- **Before opening a PR**: update `README.md` if any user-facing behaviour, defaults, or commands changed.
-- Do not merge a PR until CI is green.
+
+## Releasing
+
+Run `make release` from a clean, up-to-date main branch. It will:
+1. Checkout and pull latest main
+2. Run tests
+3. Bump the patch version
+4. Auto-generate `CHANGELOG.md` via `git-cliff`
+5. Commit, tag, and push to main
+6. Create a GitHub release with notes extracted from the changelog
+7. Publish to PyPI
+
+This is the **only** workflow that pushes directly to main.
 
 ## Architecture
 
