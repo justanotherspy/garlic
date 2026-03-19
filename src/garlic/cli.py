@@ -16,9 +16,78 @@ def cmd_version(args: argparse.Namespace) -> None:
     print(f"garlic {version}")
 
 
+def _prompt_config() -> dict[str, object]:
+    """Interactively prompt the user for config values, returning overrides."""
+    overrides: dict[str, object] = {}
+
+    print("garlic setup — configure your preferences (press Enter for defaults)\n")
+
+    # nudge_thresholds_minutes — ask as a single "nudge interval" for simplicity
+    default_interval = 30
+    raw = input(f"  Nudge interval in minutes [{default_interval}]: ").strip()
+    if raw:
+        try:
+            interval = int(raw)
+            if interval < 1:
+                raise ValueError
+            cap = DEFAULTS["nudge_thresholds_minutes"][-1]
+            overrides["nudge_thresholds_minutes"] = list(
+                range(interval, cap + 1, interval)
+            )
+        except ValueError:
+            print(f"  (invalid, using default {default_interval})")
+
+    # max_prompt_gap_minutes
+    default_gap = DEFAULTS["max_prompt_gap_minutes"]
+    raw = input(f"  Max prompt gap in minutes [{default_gap}]: ").strip()
+    if raw:
+        try:
+            gap = int(raw)
+            if gap < 1:
+                raise ValueError
+            overrides["max_prompt_gap_minutes"] = gap
+        except ValueError:
+            print(f"  (invalid, using default {default_gap})")
+
+    # reset_hour
+    default_reset = DEFAULTS["reset_hour"]
+    raw = input(f"  Daily reset hour (0-23) [{default_reset}]: ").strip()
+    if raw:
+        try:
+            hour = int(raw)
+            if not (0 <= hour <= 23):
+                raise ValueError
+            overrides["reset_hour"] = hour
+        except ValueError:
+            print(f"  (invalid, using default {default_reset})")
+
+    # nudge_style
+    default_style = DEFAULTS["nudge_style"]
+    raw = input(
+        f"  Nudge style (gentle/firm/spicy) [{default_style}]: "
+    ).strip().lower()
+    if raw:
+        if raw in VALID_NUDGE_STYLES:
+            overrides["nudge_style"] = raw
+        else:
+            print(f"  (invalid, using default {default_style})")
+
+    print()
+    return overrides
+
+
 def cmd_setup(args: argparse.Namespace) -> None:
     """Install garlic hooks into ~/.claude/settings.json."""
-    install_hooks(debug=args.debug)
+    config_overrides: dict[str, object] = {}
+
+    if not args.yes:
+        try:
+            config_overrides = _prompt_config()
+        except (EOFError, KeyboardInterrupt):
+            print("\ngarlic: setup cancelled")
+            sys.exit(1)
+
+    install_hooks(debug=args.debug, config_overrides=config_overrides)
     mode = " (debug mode)" if args.debug else ""
     print(f"garlic: hooks installed in ~/.claude/settings.json{mode}")
     print("garlic: /garlic slash command installed in ~/.claude/commands/")
@@ -202,6 +271,10 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser = sub.add_parser("setup", help="Install hooks into ~/.claude/settings.json")
     setup_parser.add_argument(
         "--debug", action="store_true", help="Install hooks with debug logging"
+    )
+    setup_parser.add_argument(
+        "-y", "--yes", action="store_true",
+        help="Skip interactive prompts and use all defaults",
     )
 
     sub.add_parser("status", help="Show accumulated active time today")

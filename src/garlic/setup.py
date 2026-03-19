@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from garlic.config import load_config
+from garlic.config import load_config, save_config
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CLAUDE_COMMANDS_DIR = Path.home() / ".claude" / "commands"
@@ -59,10 +59,16 @@ def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
         raise
 
 
-def install_hooks(debug: bool = False) -> None:
+def install_hooks(
+    debug: bool = False,
+    config_overrides: dict[str, Any] | None = None,
+) -> None:
     """Install garlic hooks into ~/.claude/settings.json (idempotent)."""
-    # Ensure config exists
-    load_config()
+    # Ensure config exists, then apply any overrides
+    config = load_config()
+    if config_overrides:
+        config.update(config_overrides)
+        save_config(config)
 
     settings_path = CLAUDE_SETTINGS_PATH
     settings_path.parent.mkdir(parents=True, exist_ok=True)
