@@ -196,24 +196,31 @@ def cmd_status(args: argparse.Namespace) -> None:
 
     # Threshold progress
     if thresholds:
-        print()
-        for t in thresholds:
-            passed = t in nudges_given
-            label = _format_duration(t)
-            if passed:
-                print(f"  \u2716 {label}")
-            elif minutes < t:
-                fraction = minutes / t if t > 0 else 1.0
-                bar = _progress_bar(fraction)
-                remaining = _format_duration(t - minutes)
-                print(f"  {bar} {label} ({remaining} to go)")
-            else:
-                # Crossed but not yet in nudges_given (edge case)
-                print(f"  \u2716 {label}")
+        # Crossed thresholds on one compact line
+        crossed = [t for t in thresholds if t in nudges_given]
+        if crossed:
+            marks = "  ".join(f"\u2716 {_format_duration(t)}" for t in crossed)
+            print(f"  {marks}")
 
-        # If all thresholds passed
+        # All thresholds passed
         if all(t in nudges_given for t in thresholds):
             print(f"\n  \U0001f9db You've crossed every threshold. Respect.")
+        else:
+            # Next nudge progress bar
+            next_t = next((t for t in thresholds if t not in nudges_given), None)
+            if next_t is not None:
+                prev_t = max((t for t in thresholds if t in nudges_given), default=0)
+                span = next_t - prev_t
+                progress = (minutes - prev_t) / span if span > 0 else 1.0
+                bar = _progress_bar(progress)
+                remaining = _format_duration(max(next_t - minutes, 0))
+                print(f"  {bar} {_format_duration(next_t)} ({remaining} to go)")
+
+            # Day progress bar (0 to max threshold)
+            max_t = thresholds[-1]
+            day_fraction = minutes / max_t if max_t > 0 else 1.0
+            day_bar = _progress_bar(day_fraction)
+            print(f"  {day_bar} {_format_duration(max_t)} day")
 
 
 def cmd_ignore(args: argparse.Namespace) -> None:
