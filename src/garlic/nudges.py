@@ -91,13 +91,11 @@ POOLS = {
 
 def _format_time(minutes: float) -> str:
     """Format accumulated minutes as a human-readable string."""
-    if minutes < 60:
-        rounded = round(minutes)
-        return f"~{rounded} minutes" if rounded != 1 else "~1 minute"
-    hours = minutes / 60
-    if hours < 1.5:
-        return "~1 hour"
-    return f"~{round(hours)} hours"
+    hours = int(minutes // 60)
+    mins = round(minutes % 60)
+    if hours > 0:
+        return f"~{hours}h {mins:02d}m"
+    return f"~{mins}m"
 
 
 def get_bedtime_nudge(accumulated_minutes: float) -> str:
