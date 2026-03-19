@@ -40,8 +40,14 @@ Run setup to install the Claude Code hooks:
 garlic setup
 ```
 
+Setup interactively prompts for key preferences (nudge interval, max prompt gap, reset hour, nudge style) with sensible defaults — just press Enter to accept them all. To skip prompts entirely and use defaults, pass `-y`:
+
+```bash
+garlic setup -y
+```
+
 This does two things:
-1. Creates `~/.garlic/config.toml` with sensible defaults
+1. Creates `~/.garlic/config.toml` (with your chosen settings or sensible defaults)
 2. Adds garlic's hooks to `~/.claude/settings.json` so they run across all your projects
 
 Setup is idempotent — safe to run again if you need to repair or update hooks.

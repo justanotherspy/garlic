@@ -11,6 +11,7 @@ def test_install_hooks_creates_settings(tmp_path, monkeypatch):
     settings_path = tmp_path / ".claude" / "settings.json"
     monkeypatch.setattr("garlic.setup.CLAUDE_SETTINGS_PATH", settings_path)
     monkeypatch.setattr("garlic.setup.load_config", lambda: {})
+    monkeypatch.setattr("garlic.setup.save_config", lambda c: None)
 
     install_hooks()
 
@@ -38,6 +39,7 @@ def test_install_hooks_idempotent(tmp_path, monkeypatch):
     settings_path = tmp_path / ".claude" / "settings.json"
     monkeypatch.setattr("garlic.setup.CLAUDE_SETTINGS_PATH", settings_path)
     monkeypatch.setattr("garlic.setup.load_config", lambda: {})
+    monkeypatch.setattr("garlic.setup.save_config", lambda c: None)
 
     install_hooks()
     install_hooks()
@@ -62,6 +64,7 @@ def test_install_hooks_preserves_other_hooks(tmp_path, monkeypatch):
     settings_path.write_text(json.dumps(existing))
     monkeypatch.setattr("garlic.setup.CLAUDE_SETTINGS_PATH", settings_path)
     monkeypatch.setattr("garlic.setup.load_config", lambda: {})
+    monkeypatch.setattr("garlic.setup.save_config", lambda c: None)
 
     install_hooks()
 
@@ -82,6 +85,7 @@ def test_install_hooks_atomic_preserves_file_on_write_failure(tmp_path, monkeypa
     settings_path.write_text(original_text)
     monkeypatch.setattr("garlic.setup.CLAUDE_SETTINGS_PATH", settings_path)
     monkeypatch.setattr("garlic.setup.load_config", lambda: {})
+    monkeypatch.setattr("garlic.setup.save_config", lambda c: None)
 
     with patch("garlic.setup.os.replace", side_effect=OSError("disk full")):
         try:
