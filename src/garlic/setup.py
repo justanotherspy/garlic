@@ -10,6 +10,12 @@ from garlic.config import load_config, save_config
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CLAUDE_COMMANDS_DIR = Path.home() / ".claude" / "commands"
+CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"
+
+_GARLIC_CLAUDE_MD_BLOCK = """\
+## garlic
+If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it.
+"""
 
 GARLIC_COMMAND = "Run `garlic status` and show the output to me.\n"
 
@@ -98,9 +104,21 @@ def install_hooks(
     # Install /garlic slash command globally
     install_slash_command()
 
+    # Install nudge-relay instruction into ~/.claude/CLAUDE.md
+    install_claude_md()
+
 
 def install_slash_command() -> None:
     """Install the /garlic slash command into ~/.claude/commands/."""
     CLAUDE_COMMANDS_DIR.mkdir(parents=True, exist_ok=True)
     command_path = CLAUDE_COMMANDS_DIR / "garlic.md"
     command_path.write_text(GARLIC_COMMAND)
+
+
+def install_claude_md() -> None:
+    """Append garlic nudge-relay instruction to ~/.claude/CLAUDE.md (idempotent)."""
+    CLAUDE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
+    existing = CLAUDE_MD_PATH.read_text() if CLAUDE_MD_PATH.exists() else ""
+    if "## garlic" not in existing:
+        separator = "\n" if existing and not existing.endswith("\n") else ""
+        CLAUDE_MD_PATH.write_text(existing + separator + _GARLIC_CLAUDE_MD_BLOCK)
