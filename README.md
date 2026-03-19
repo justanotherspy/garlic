@@ -50,6 +50,12 @@ This does two things:
 1. Creates `~/.garlic/config.toml` (with your chosen settings or sensible defaults)
 2. Adds garlic's hooks to `~/.claude/settings.json` so they run across all your projects
 
+To reset your config to the latest built-in defaults (useful after upgrading):
+
+```bash
+garlic setup --defaults
+```
+
 Setup is idempotent — safe to run again if you need to repair or update hooks.
 
 ## Upgrading

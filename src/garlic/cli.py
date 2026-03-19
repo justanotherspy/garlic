@@ -118,7 +118,20 @@ def cmd_setup(args: argparse.Namespace) -> None:
     """Install garlic hooks into ~/.claude/settings.json."""
     config_overrides: dict[str, object] = {}
 
-    if not args.yes:
+    if args.defaults:
+        if not args.yes:
+            try:
+                answer = input(
+                    "garlic: overwrite config with built-in defaults? [y/N] "
+                )
+            except (EOFError, KeyboardInterrupt):
+                print("\ngarlic: setup cancelled")
+                sys.exit(1)
+            if answer.strip().lower() not in ("y", "yes"):
+                print("garlic: setup cancelled")
+                return
+        config_overrides = dict(DEFAULTS)
+    elif not args.yes:
         try:
             config_overrides = _prompt_config()
         except (EOFError, KeyboardInterrupt):
@@ -129,6 +142,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
     mode = " (debug mode)" if args.debug else ""
     print(f"garlic: hooks installed in ~/.claude/settings.json{mode}")
     print("garlic: /garlic slash command installed in ~/.claude/commands/")
+    if args.defaults:
+        print("garlic: config reset to built-in defaults")
 
 
 def _format_duration(minutes: float) -> str:
@@ -313,6 +328,10 @@ def build_parser() -> argparse.ArgumentParser:
     setup_parser.add_argument(
         "-y", "--yes", action="store_true",
         help="Skip interactive prompts and use all defaults",
+    )
+    setup_parser.add_argument(
+        "--defaults", action="store_true",
+        help="Overwrite existing config with built-in defaults",
     )
 
     sub.add_parser("status", help="Show accumulated active time today")
