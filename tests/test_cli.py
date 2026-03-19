@@ -143,7 +143,7 @@ def test_prompt_config_invalid_values_use_defaults(capsys):
 
 def test_cmd_setup_yes_skips_prompts(capsys):
     """--yes flag skips interactive prompts entirely."""
-    args = argparse.Namespace(yes=True, debug=False)
+    args = argparse.Namespace(yes=True, debug=False, defaults=False)
     with patch("garlic.cli.install_hooks") as mock_install:
         cmd_setup(args)
     mock_install.assert_called_once_with(debug=False, config_overrides={})
@@ -151,9 +151,43 @@ def test_cmd_setup_yes_skips_prompts(capsys):
     assert "hooks installed" in out
 
 
+def test_cmd_setup_defaults_with_yes(capsys):
+    """--defaults -y overwrites config with built-in defaults without prompting."""
+    args = argparse.Namespace(yes=True, debug=False, defaults=True)
+    with patch("garlic.cli.install_hooks") as mock_install:
+        cmd_setup(args)
+    from garlic.config import DEFAULTS
+    mock_install.assert_called_once_with(debug=False, config_overrides=dict(DEFAULTS))
+    out = capsys.readouterr().out
+    assert "config reset to built-in defaults" in out
+
+
+def test_cmd_setup_defaults_confirmed(capsys):
+    """--defaults prompts for confirmation and proceeds on 'y'."""
+    args = argparse.Namespace(yes=False, debug=False, defaults=True)
+    with patch("builtins.input", return_value="y"), \
+         patch("garlic.cli.install_hooks") as mock_install:
+        cmd_setup(args)
+    from garlic.config import DEFAULTS
+    mock_install.assert_called_once_with(debug=False, config_overrides=dict(DEFAULTS))
+    out = capsys.readouterr().out
+    assert "config reset to built-in defaults" in out
+
+
+def test_cmd_setup_defaults_declined(capsys):
+    """--defaults prompts for confirmation and aborts on 'n'."""
+    args = argparse.Namespace(yes=False, debug=False, defaults=True)
+    with patch("builtins.input", return_value="n"), \
+         patch("garlic.cli.install_hooks") as mock_install:
+        cmd_setup(args)
+    mock_install.assert_not_called()
+    out = capsys.readouterr().out
+    assert "setup cancelled" in out
+
+
 def test_cmd_setup_interactive_passes_overrides(capsys):
     """Interactive mode passes user overrides to install_hooks."""
-    args = argparse.Namespace(yes=False, debug=False)
+    args = argparse.Namespace(yes=False, debug=False, defaults=False)
     inputs = iter(["60", "", "", "firm"])
     with patch("builtins.input", side_effect=inputs), \
          patch("garlic.cli.install_hooks") as mock_install:
