@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [0.1.9] - 2026-03-19
+
+### Fixed
+- **setup**: Deduplicate nudge relay and document CLAUDE.md install step (#17)
+
 ## [0.1.8] - 2026-03-19
 
 ### Added
