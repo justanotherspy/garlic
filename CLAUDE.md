@@ -21,12 +21,35 @@
 - Keep tests fast; avoid network calls in unit tests.
 - Add pytest as a dev dependency: `uv add --dev pytest`
 
-## CI / Pull Request workflow
+## Development workflow (bead → PR → merge)
+
+1. **Claim the bead**: `bd update <id> --status=in_progress`
+2. **Ensure main is up to date**: `git checkout main && git pull`
+3. **Create a feature branch**: `git checkout -b <bead-id>/<short-description>`
+4. **Implement, test, commit**. Update `README.md` if any user-facing behaviour changed.
+5. **Push and open a PR**: branch name and PR title must include the bead ID (e.g. `garlic-abc`). One bead per PR.
+6. **PR description** must have two sections: **Goal** (the problem/feature from the bead) and **Solution** (how it was implemented).
+7. **Wait for CI** — do not merge until green.
+8. **After the user confirms the PR is merged**: `bd close <id> --reason="PR #N merged"`, then `git checkout main && git pull`.
+
+**Never push code directly to main.** The only exception is `make release`, which pushes release metadata (changelog, version bump) directly.
+
+## CI
 - CI runs automatically on every PR and push to `main` via `.github/workflows/ci.yml`.
 - It runs `uv sync` then `uv run pytest` against Python 3.11 and 3.12.
-- All PRs should be opened against `main`. The PR template (`.github/pull_request_template.md`) will pre-fill with a summary, test plan, and checklist.
-- **Before opening a PR**: update `README.md` if any user-facing behaviour, defaults, or commands changed.
-- Do not merge a PR until CI is green.
+
+## Releasing
+
+Run `make release` from a clean, up-to-date main branch. It will:
+1. Checkout and pull latest main
+2. Run tests
+3. Prompt for changelog update (you must edit `CHANGELOG.md` before continuing)
+4. Bump the patch version
+5. Commit, tag, and push to main
+6. Create a GitHub release
+7. Publish to PyPI
+
+This is the **only** workflow that pushes directly to main.
 
 ## Architecture
 
@@ -163,16 +186,20 @@ This project uses **bd (beads)** for issue tracking.
 
 **Starting work:**
 ```bash
-bd ready           # Find available work
-bd show <id>       # Review issue details
-bd update <id> --status=in_progress  # Claim it
+bd ready                              # Find available work
+bd show <id>                          # Review issue details
+bd update <id> --status=in_progress   # Claim it
+git checkout main && git pull         # Ensure main is current
+git checkout -b <bead-id>/description # Feature branch
 ```
 
-**Completing work:**
+**Completing work (PR, not direct push):**
 ```bash
-bd close <id1> <id2> ...    # Close all completed issues at once
-git add . && git commit -m "..."  # Commit code changes
-git push                    # Push to remote
+git push -u origin <branch>           # Push feature branch
+gh pr create --title "<bead-id>: ..." # Open PR with bead ID in title
+# Wait for user to confirm merge, then:
+bd close <id> --reason="PR #N merged"
+git checkout main && git pull
 ```
 
 **Creating dependent work:**
