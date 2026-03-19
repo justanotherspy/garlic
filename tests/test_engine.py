@@ -2,7 +2,7 @@
 
 from unittest.mock import patch
 
-from garlic.engine import handle_prompt, handle_session_start, handle_stop
+from garlic.engine import check_bedtime, handle_prompt, handle_session_start, handle_stop
 
 
 def _make_config(**overrides):
@@ -287,3 +287,66 @@ def test_threshold_not_refired_after_crossing():
         r2 = handle_prompt(state, config)
     assert r2 is None
     assert state["nudges_given"].count(60) == 1  # recorded only once
+
+
+# ---------------------------------------------------------------------------
+# Bedtime nudge tests
+# ---------------------------------------------------------------------------
+
+
+def test_check_bedtime_fires_in_window():
+    """check_bedtime returns True when current hour is one before reset_hour."""
+    from datetime import datetime
+
+    state = _make_state()
+    config = _make_config(reset_hour=2)
+
+    with patch("garlic.engine.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 16, 1, 30)  # 1:30 AM
+        result = check_bedtime(state, config)
+
+    assert result is True
+    assert state["bedtime_nudge_given"] is True
+
+
+def test_check_bedtime_not_in_window():
+    """check_bedtime returns False when outside the bedtime hour."""
+    from datetime import datetime
+
+    state = _make_state()
+    config = _make_config(reset_hour=2)
+
+    with patch("garlic.engine.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 16, 22, 0)  # 10 PM
+        result = check_bedtime(state, config)
+
+    assert result is False
+    assert state.get("bedtime_nudge_given", False) is False
+
+
+def test_check_bedtime_only_fires_once():
+    """check_bedtime returns False on second call (already given)."""
+    from datetime import datetime
+
+    state = _make_state(bedtime_nudge_given=True)
+    config = _make_config(reset_hour=2)
+
+    with patch("garlic.engine.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 16, 1, 30)
+        result = check_bedtime(state, config)
+
+    assert result is False
+
+
+def test_check_bedtime_wraps_midnight():
+    """When reset_hour=0, bedtime hour is 23."""
+    from datetime import datetime
+
+    state = _make_state()
+    config = _make_config(reset_hour=0)
+
+    with patch("garlic.engine.datetime") as mock_dt:
+        mock_dt.now.return_value = datetime(2026, 3, 16, 23, 15)
+        result = check_bedtime(state, config)
+
+    assert result is True

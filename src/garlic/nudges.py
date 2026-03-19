@@ -69,6 +69,19 @@ FINAL = [
     "Final nudge: {time}. The work will keep. You need to stop.",
 ]
 
+BEDTIME = [
+    "It's getting late — {time} today and nearly reset time. Wrap up and get some sleep.",
+    "{time} of coding and the clock's ticking toward bedtime. Save your work and call it a night.",
+    "Late-night nudge: {time} today. Tomorrow-you will code better after real sleep.",
+    "{time} logged and it's almost tomorrow. Commit what you have and close the laptop.",
+    "You've done {time} and it's past your bedtime. The bugs will still be there in the morning.",
+    "{time} today, and the night's almost over. Sleep is the best debugger.",
+    "It's late. {time} of coding is plenty. Shut it down and get some rest.",
+    "{time} and counting at this hour? Your pillow misses you. Wrap it up.",
+    "Almost reset time — {time} today. Push your branch and go to bed.",
+    "{time} of coding into the wee hours. Nothing good happens in code after midnight.",
+]
+
 POOLS = {
     "gentle": GENTLE,
     "firm": FIRM,
@@ -85,6 +98,13 @@ def _format_time(minutes: float) -> str:
     if hours < 1.5:
         return "~1 hour"
     return f"~{round(hours)} hours"
+
+
+def get_bedtime_nudge(accumulated_minutes: float) -> str:
+    """Pick a random bedtime nudge message."""
+    time_str = _format_time(accumulated_minutes)
+    message = random.choice(BEDTIME)
+    return message.format(time=time_str)
 
 
 def get_nudge(style: str, accumulated_minutes: float, is_final: bool = False) -> str:

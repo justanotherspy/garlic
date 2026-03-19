@@ -17,6 +17,7 @@ DEFAULT_STATE: dict[str, Any] = {
     "last_event_time": 0.0,
     "nudges_given": [],
     "ignored": False,
+    "bedtime_nudge_given": False,
 }
 
 
