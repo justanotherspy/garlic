@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [0.1.8] - 2026-03-19
+
+### Added
+- **setup**: Install nudge-relay instruction into ~/.claude/CLAUDE.md (garlic-w16) (#16)
+
+### Fixed
+- **nudges**: Improve time accuracy and simplify status output (garlic-6re) (#15)
+
 ## [0.1.7] - 2026-03-19
 
 ### Added
