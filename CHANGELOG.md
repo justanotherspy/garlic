@@ -6,6 +6,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-03-19
+
+### Added
+- `garlic setup` is now interactive by default — prompts for nudge interval, max prompt gap, reset hour, and nudge style with sensible defaults (#10)
+- `-y`/`--yes` flag on `garlic setup` to skip prompts and use all defaults
+- `garlic version` now checks PyPI for newer releases and suggests upgrading (#11)
+- Pre-reset bedtime nudge warns you when it's getting late (#8)
+- Definitive final nudge at the last threshold (#5)
+- Nudge output prefixed with instruction to relay verbatim (#7)
+
+### Changed
+- Nudge every 30 minutes for 4 hours (was variable) (#5)
+- Increase default `max_prompt_gap_minutes` from 20 to 40 (#4)
+- Gaps exceeding the cap are dropped entirely (#9)
+
+### Fixed
+- `garlic setup` writes `settings.json` atomically to prevent corruption
+
+### CI
+- Bump `actions/checkout` to v6, `astral-sh/setup-uv` to v7 (#2, #3)
+- Add GHA CI workflow and PR template (#1)
+- Update README defaults; remind to update README before PRs (#6)
+
 ## [0.1.5] - 2026-03-16
 
 ### Added

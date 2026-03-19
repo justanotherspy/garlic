@@ -1,6 +1,6 @@
 [project]
 name = "garlic-cli"
-version = "0.1.5"
+version = "0.1.6"
 description = "Track active coding time with Claude Code and nudge yourself to take breaks"
 requires-python = ">=3.11"
 dependencies = []
