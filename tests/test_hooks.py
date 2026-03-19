@@ -166,6 +166,7 @@ def test_hook_prompt_with_nudge(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert len(captured.out.strip()) > 0  # nudge was printed
+    assert captured.out.startswith("Please relay the following message")
 
 
 def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):

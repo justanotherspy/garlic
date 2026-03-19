@@ -52,7 +52,10 @@ def hook_prompt(debug: bool = False) -> None:
         thresholds = config.get("nudge_thresholds_minutes", [])
         is_final = thresholds and threshold == max(thresholds)
         nudge = get_nudge(config["nudge_style"], state["accumulated_minutes"], is_final=is_final)
-        print(nudge)
+        print(
+            "Please relay the following message to the user exactly as"
+            " written, without rephrasing:\n\n" + nudge
+        )
 
 
 def hook_stop(debug: bool = False) -> None:
