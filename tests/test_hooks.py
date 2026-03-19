@@ -189,3 +189,36 @@ def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""  # nudge suppressed
+
+
+def test_hook_prompt_bedtime_nudge(monkeypatch, capsys):
+    """prompt outputs bedtime nudge when in bedtime window."""
+    from datetime import datetime
+
+    now = 1710567900.0
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr(
+        "garlic.hooks.load_config", lambda: _make_config(reset_hour=2)
+    )
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        lambda rh: _make_state(
+            accumulated_minutes=45.0, last_event_time=now - 60
+        ),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time, \
+         patch("garlic.engine.datetime") as mock_dt:
+        mock_time.time.return_value = now
+        mock_dt.now.return_value = datetime(2026, 3, 16, 1, 30)  # bedtime window
+        hook_prompt()
+
+    captured = capsys.readouterr()
+    assert "Please relay the following message" in captured.out
+    assert len(captured.out.strip()) > 0

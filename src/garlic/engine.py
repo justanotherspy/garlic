@@ -2,6 +2,7 @@
 
 import sys
 import time
+from datetime import datetime
 from typing import Any
 
 
@@ -82,3 +83,22 @@ def _check_thresholds(
             return threshold
 
     return None
+
+
+def check_bedtime(state: dict[str, Any], config: dict[str, Any]) -> bool:
+    """Return True if we're in the bedtime window and haven't nudged yet.
+
+    The bedtime window is the hour before reset_hour (e.g. 1 AM if reset is 2 AM).
+    """
+    if state.get("bedtime_nudge_given", False):
+        return False
+
+    reset_hour = config.get("reset_hour", 2)
+    bedtime_hour = (reset_hour - 1) % 24
+    now = datetime.now()
+
+    if now.hour == bedtime_hour:
+        state["bedtime_nudge_given"] = True
+        return True
+
+    return False

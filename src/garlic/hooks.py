@@ -5,8 +5,8 @@ import sys
 from typing import Any
 
 from garlic.config import load_config
-from garlic.engine import handle_prompt, handle_session_start, handle_stop
-from garlic.nudges import get_nudge
+from garlic.engine import check_bedtime, handle_prompt, handle_session_start, handle_stop
+from garlic.nudges import get_bedtime_nudge, get_nudge
 from garlic.state import load_state, save_state
 
 
@@ -48,10 +48,17 @@ def hook_prompt(debug: bool = False) -> None:
     threshold = handle_prompt(state, config, debug=debug)
     save_state(state)
 
+    nudge = None
+
     if threshold is not None and not state.get("ignored", False):
         thresholds = config.get("nudge_thresholds_minutes", [])
         is_final = thresholds and threshold == max(thresholds)
         nudge = get_nudge(config["nudge_style"], state["accumulated_minutes"], is_final=is_final)
+    elif not state.get("ignored", False) and check_bedtime(state, config):
+        nudge = get_bedtime_nudge(state["accumulated_minutes"])
+        save_state(state)  # persist bedtime_nudge_given
+
+    if nudge is not None:
         print(
             "Please relay the following message to the user exactly as"
             " written, without rephrasing:\n\n" + nudge
