@@ -224,6 +224,61 @@ def cmd_status(args: argparse.Namespace) -> None:
             print(f"  {day_bar} {_format_duration(max_t)} day")
 
 
+def cmd_week(args: argparse.Namespace) -> None:
+    """Show a rolling 7-day usage summary."""
+    from datetime import datetime, timedelta
+
+    config = load_config()
+    state = load_state(config["reset_hour"])
+
+    # Build lookup from history
+    history_map: dict[str, float] = {}
+    for entry in state.get("history", []):
+        history_map[entry["date"]] = entry["minutes"]
+
+    # Today's date (shifted by reset_hour)
+    now = datetime.now()
+    if now.hour < config["reset_hour"]:
+        now -= timedelta(days=1)
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Build 7-day window (oldest first)
+    days: list[tuple[str, float]] = []
+    for i in range(6, -1, -1):
+        d = now - timedelta(days=i)
+        date_str = d.strftime("%Y-%m-%d")
+        if date_str == today_str:
+            minutes = state["accumulated_minutes"]
+        else:
+            minutes = history_map.get(date_str, 0.0)
+        days.append((date_str, minutes))
+
+    # Daily target = max nudge threshold
+    thresholds = config.get("nudge_thresholds_minutes", [])
+    target = max(thresholds) if thresholds else 240
+    bar_max = target  # bars are relative to the daily target
+
+    print("\U0001f9c4 Weekly usage (last 7 days)\n")
+
+    total = 0.0
+    under_target = 0
+    for date_str, minutes in days:
+        d = datetime.strptime(date_str, "%Y-%m-%d")
+        day_label = d.strftime("%a %m/%d")
+        time_str = _format_duration(minutes)
+        fraction = minutes / bar_max if bar_max > 0 else 0.0
+        bar = _progress_bar(fraction, width=16)
+        marker = "  \u2190 today" if date_str == today_str else ""
+        print(f"  {day_label}   {time_str:>7s}  {bar}{marker}")
+        total += minutes
+        if minutes < target:
+            under_target += 1
+
+    target_str = _format_duration(target)
+    total_str = _format_duration(total)
+    print(f"\n  Total: {total_str} \u00b7 {under_target} of 7 days under {target_str} target")
+
+
 def cmd_ignore(args: argparse.Namespace) -> None:
     """Toggle nudging for the rest of the day."""
     config = load_config()
@@ -343,6 +398,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("status", help="Show accumulated active time today")
+    sub.add_parser("week", help="Show rolling 7-day usage summary")
     sub.add_parser("ignore", help="Toggle nudging for the day")
 
     set_parser = sub.add_parser("set", help="Update a config value (KEY=VALUE)")
@@ -380,6 +436,7 @@ def main() -> None:
         "version": cmd_version,
         "setup": cmd_setup,
         "status": cmd_status,
+        "week": cmd_week,
         "ignore": cmd_ignore,
         "set": cmd_set,
         "reset": cmd_reset,

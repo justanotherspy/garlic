@@ -18,7 +18,10 @@ DEFAULT_STATE: dict[str, Any] = {
     "nudges_given": [],
     "ignored": False,
     "bedtime_nudge_given": False,
+    "history": [],
 }
+
+HISTORY_MAX = 30
 
 
 def _current_date(reset_hour: int) -> str:
@@ -53,10 +56,22 @@ def load_state(reset_hour: int) -> dict[str, Any]:
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
 
-    # Day reset
+    # Day reset — archive previous day before resetting
     if state.get("date") != today:
+        old_date = state.get("date", "")
+        old_minutes = state.get("accumulated_minutes", 0.0)
+        history = list(state.get("history", []))
+        if old_date and old_minutes > 0:
+            history.append({"date": old_date, "minutes": old_minutes})
+            history = history[-HISTORY_MAX:]
+
         state = dict(DEFAULT_STATE)
         state["date"] = today
+        state["history"] = history
+
+    # Ensure history key exists for older state files
+    if "history" not in state:
+        state["history"] = []
 
     return state
 
@@ -77,7 +92,17 @@ def _write_state(f: Any, state: dict[str, Any]) -> None:
     """Serialize state as TOML to an open file handle."""
     lines: list[str] = []
     for key, value in state.items():
-        if isinstance(value, str):
+        if key == "history":
+            # Serialize as TOML array of inline tables
+            if value:
+                entries = ", ".join(
+                    '{date = "%s", minutes = %s}' % (e["date"], e["minutes"])
+                    for e in value
+                )
+                lines.append(f"history = [{entries}]")
+            else:
+                lines.append("history = []")
+        elif isinstance(value, str):
             lines.append(f'{key} = "{value}"')
         elif isinstance(value, bool):
             lines.append(f"{key} = {'true' if value else 'false'}")

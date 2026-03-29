@@ -76,6 +76,9 @@ garlic version
 # See how long you have been Clauding today
 garlic status
 
+# See your rolling 7-day usage summary
+garlic week
+
 # Disable nudging for the rest of the day (tracking continues)
 garlic ignore
 ```
