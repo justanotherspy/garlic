@@ -6,32 +6,26 @@ from pathlib import Path
 from garlic.config import DEFAULTS, load_config, _write_toml
 
 
-def test_load_config_creates_default(tmp_path, monkeypatch):
+def test_load_config_creates_default(garlic_env):
     """When no config exists, load_config creates one with defaults."""
-    garlic_dir = tmp_path / ".garlic"
-    monkeypatch.setattr("garlic.config.GARLIC_DIR", garlic_dir)
-    monkeypatch.setattr("garlic.config.CONFIG_PATH", garlic_dir / "config.toml")
+    garlic_dir, config_path, _ = garlic_env
+    config_path.unlink()  # remove default so it creates fresh
 
     config = load_config()
 
     assert config == DEFAULTS
-    assert (garlic_dir / "config.toml").exists()
+    assert config_path.exists()
 
     # Verify the written file round-trips correctly
-    with (garlic_dir / "config.toml").open("rb") as f:
+    with config_path.open("rb") as f:
         on_disk = tomllib.load(f)
     assert on_disk == DEFAULTS
 
 
-def test_load_config_reads_existing(tmp_path, monkeypatch):
+def test_load_config_reads_existing(garlic_env):
     """When config exists, load_config reads it and merges with defaults."""
-    garlic_dir = tmp_path / ".garlic"
-    garlic_dir.mkdir()
-    config_path = garlic_dir / "config.toml"
+    _, config_path, _ = garlic_env
     config_path.write_text('nudge_style = "spicy"\n')
-
-    monkeypatch.setattr("garlic.config.GARLIC_DIR", garlic_dir)
-    monkeypatch.setattr("garlic.config.CONFIG_PATH", config_path)
 
     config = load_config()
 
@@ -41,20 +35,15 @@ def test_load_config_reads_existing(tmp_path, monkeypatch):
     assert config["nudge_thresholds_minutes"] == [30, 60, 90, 120, 150, 180, 210, 240]
 
 
-def test_load_config_user_overrides_all(tmp_path, monkeypatch):
+def test_load_config_user_overrides_all(garlic_env):
     """User values override all defaults."""
-    garlic_dir = tmp_path / ".garlic"
-    garlic_dir.mkdir()
-    config_path = garlic_dir / "config.toml"
+    _, config_path, _ = garlic_env
     config_path.write_text(
         'max_prompt_gap_minutes = 5\n'
         'reset_hour = 4\n'
         'nudge_thresholds_minutes = [30, 60]\n'
         'nudge_style = "firm"\n'
     )
-
-    monkeypatch.setattr("garlic.config.GARLIC_DIR", garlic_dir)
-    monkeypatch.setattr("garlic.config.CONFIG_PATH", config_path)
 
     config = load_config()
 

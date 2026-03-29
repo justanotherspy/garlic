@@ -33,10 +33,10 @@ def test_current_date_before_reset_hour():
         assert _current_date(2) == "2026-03-15"
 
 
-def test_load_state_creates_fresh(tmp_path, monkeypatch):
+def test_load_state_creates_fresh(garlic_env):
     """When no state file exists, returns fresh state with today's date."""
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
-    monkeypatch.setattr("garlic.state.STATE_PATH", tmp_path / "state.toml")
+    _, _, state_path = garlic_env
+    state_path.unlink()  # remove default state so it creates fresh
 
     with patch("garlic.state._current_date", return_value="2026-03-16"):
         state = load_state(reset_hour=2)
@@ -47,9 +47,9 @@ def test_load_state_creates_fresh(tmp_path, monkeypatch):
     assert state["ignored"] is False
 
 
-def test_load_state_reads_existing(tmp_path, monkeypatch):
+def test_load_state_reads_existing(garlic_env):
     """When state file exists with matching date, reads it."""
-    state_path = tmp_path / "state.toml"
+    _, _, state_path = garlic_env
     state_path.write_text(
         'date = "2026-03-16"\n'
         "accumulated_minutes = 45.5\n"
@@ -57,8 +57,6 @@ def test_load_state_reads_existing(tmp_path, monkeypatch):
         "nudges_given = [60]\n"
         "ignored = false\n"
     )
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
-    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
 
     with patch("garlic.state._current_date", return_value="2026-03-16"):
         state = load_state(reset_hour=2)
@@ -67,9 +65,9 @@ def test_load_state_reads_existing(tmp_path, monkeypatch):
     assert state["nudges_given"] == [60]
 
 
-def test_load_state_resets_on_new_day(tmp_path, monkeypatch):
+def test_load_state_resets_on_new_day(garlic_env):
     """When date doesn't match, state resets."""
-    state_path = tmp_path / "state.toml"
+    _, _, state_path = garlic_env
     state_path.write_text(
         'date = "2026-03-15"\n'
         "accumulated_minutes = 120.0\n"
@@ -77,8 +75,6 @@ def test_load_state_resets_on_new_day(tmp_path, monkeypatch):
         "nudges_given = [60, 120]\n"
         "ignored = true\n"
     )
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
-    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
 
     with patch("garlic.state._current_date", return_value="2026-03-16"):
         state = load_state(reset_hour=2)
@@ -89,11 +85,9 @@ def test_load_state_resets_on_new_day(tmp_path, monkeypatch):
     assert state["ignored"] is False
 
 
-def test_concurrent_saves_dont_corrupt(tmp_path, monkeypatch):
+def test_concurrent_saves_dont_corrupt(garlic_env):
     """Concurrent save_state calls from multiple threads produce valid TOML."""
-    state_path = tmp_path / "state.toml"
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
-    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
+    _, _, state_path = garlic_env
 
     errors = []
 
@@ -123,11 +117,9 @@ def test_concurrent_saves_dont_corrupt(tmp_path, monkeypatch):
     assert "accumulated_minutes" in loaded
 
 
-def test_save_state_roundtrip(tmp_path, monkeypatch):
+def test_save_state_roundtrip(garlic_env):
     """save_state writes state that can be read back by tomllib."""
-    state_path = tmp_path / "state.toml"
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", tmp_path)
-    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
+    _, _, state_path = garlic_env
 
     state = {
         "date": "2026-03-16",
