@@ -20,6 +20,8 @@
 - Run tests with `uv run pytest`.
 - Keep tests fast; avoid network calls in unit tests.
 - Add pytest as a dev dependency: `uv add --dev pytest`
+- **All tests must use the shared `garlic_env` fixture** from `tests/conftest.py`. This redirects `GARLIC_DIR`, `CONFIG_PATH`, and `STATE_PATH` to a temporary directory so tests never touch the user's real `~/.garlic/`. If a test needs custom state or config, override the file contents after requesting the fixture — never patch paths manually.
+- **Never run garlic commands (e.g. `save_state`, `garlic status`) against real paths in tests or ad-hoc scripts.** The round-trip test that corrupted `~/.garlic/state.toml` is why this rule exists.
 
 ## Commit messages
 

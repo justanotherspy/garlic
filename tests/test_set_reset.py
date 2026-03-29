@@ -9,22 +9,11 @@ from garlic.cli import cmd_set, cmd_reset, _parse_config_value
 
 
 @pytest.fixture
-def garlic_env(tmp_path, monkeypatch):
-    """Set up a temporary garlic dir for config and state."""
-    garlic_dir = tmp_path / ".garlic"
-    garlic_dir.mkdir()
-    config_path = garlic_dir / "config.toml"
-    state_path = garlic_dir / "state.toml"
+def garlic_env(garlic_env):
+    """Extend the shared garlic_env with accumulated time for set/reset tests."""
+    garlic_dir, config_path, state_path = garlic_env
 
-    # Write default config
-    config_path.write_text(
-        'max_prompt_gap_minutes = 20\n'
-        'reset_hour = 2\n'
-        'nudge_thresholds_minutes = [60, 120, 180, 240]\n'
-        'nudge_style = "gentle"\n'
-    )
-
-    # Write state with some accumulated time
+    # Override with test-specific state (has accumulated time)
     state_path.write_text(
         'date = "2026-03-16"\n'
         'accumulated_minutes = 95.0\n'
@@ -32,11 +21,6 @@ def garlic_env(tmp_path, monkeypatch):
         'nudges_given = [60]\n'
         'ignored = false\n'
     )
-
-    monkeypatch.setattr("garlic.config.GARLIC_DIR", garlic_dir)
-    monkeypatch.setattr("garlic.config.CONFIG_PATH", config_path)
-    monkeypatch.setattr("garlic.state.GARLIC_DIR", garlic_dir)
-    monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
 
     return garlic_dir, config_path, state_path
 
