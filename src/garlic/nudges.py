@@ -94,8 +94,8 @@ def _format_time(minutes: float) -> str:
     hours = int(minutes // 60)
     mins = round(minutes % 60)
     if hours > 0:
-        return f"~{hours}h {mins:02d}m"
-    return f"~{mins}m"
+        return f"{hours}h {mins:02d}m"
+    return f"{mins}m"
 
 
 def get_bedtime_nudge(accumulated_minutes: float) -> str:
