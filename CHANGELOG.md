@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 
+## [0.1.10] - 2026-03-29
+
+### Added
+- **nudges**: Show exact time in nudge messages instead of approximate (garlic-u78) (#19)
+- **cli**: Add weekly usage tracking with garlic week command (garlic-we0) (#20)
+
+### Fixed
+- **setup**: Print CLAUDE.md install confirmation line (garlic-0kd) (#18)
+
 ## [0.1.9] - 2026-03-19
 
 ### Fixed
