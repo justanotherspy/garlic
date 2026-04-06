@@ -53,6 +53,22 @@ class TestParseConfigValue:
         with pytest.raises(ValueError, match="comma-separated integers"):
             _parse_config_value("nudge_thresholds_minutes", "30,abc,90")
 
+    def test_thresholds_unsorted(self):
+        with pytest.raises(ValueError, match="ascending order"):
+            _parse_config_value("nudge_thresholds_minutes", "240,30,10")
+
+    def test_thresholds_negative(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            _parse_config_value("nudge_thresholds_minutes", "-10,30,60")
+
+    def test_thresholds_zero(self):
+        with pytest.raises(ValueError, match="positive integers"):
+            _parse_config_value("nudge_thresholds_minutes", "0,30,60")
+
+    def test_thresholds_duplicates(self):
+        with pytest.raises(ValueError, match="duplicates"):
+            _parse_config_value("nudge_thresholds_minutes", "30,30,60")
+
     def test_unknown_key(self):
         with pytest.raises(ValueError, match="unknown config key"):
             _parse_config_value("nonexistent", "value")
