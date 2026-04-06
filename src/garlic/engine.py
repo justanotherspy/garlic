@@ -43,19 +43,22 @@ def handle_prompt(
 def handle_stop(state: dict[str, Any], config: dict[str, Any], debug: bool = False) -> None:
     """Process a stop event: accumulate generation time and update last_event_time.
 
-    Generation time is always counted in full (no cap) — Claude responding
-    is unambiguously active coding time.
+    Generation time is clamped to max_generation_minutes (default 120) to
+    guard against hung processes or forgotten sessions inflating the total.
     """
     now = time.time()
     last = state.get("last_event_time", 0.0)
 
     if last > 0:
-        gap_minutes = (now - last) / 60.0
+        raw_gap = (now - last) / 60.0
+        cap = config.get("max_generation_minutes", 120)
+        gap_minutes = min(raw_gap, cap)
         state["accumulated_minutes"] += gap_minutes
 
         if debug:
+            clamped = " → clamped to {:.0f}m cap".format(cap) if raw_gap > cap else ""
             print(
-                f"[garlic debug] stop gap: {gap_minutes:.2f}m"
+                f"[garlic debug] stop gap: {raw_gap:.2f}m{clamped}"
                 + f" | total: {state['accumulated_minutes']:.2f}m",
                 file=sys.stderr,
             )

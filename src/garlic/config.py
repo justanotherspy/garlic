@@ -9,6 +9,7 @@ CONFIG_PATH = GARLIC_DIR / "config.toml"
 
 DEFAULTS: dict[str, Any] = {
     "max_prompt_gap_minutes": 40,
+    "max_generation_minutes": 120,
     "reset_hour": 2,
     "nudge_thresholds_minutes": [30, 60, 90, 120, 150, 180, 210, 240],
     "nudge_style": "gentle",

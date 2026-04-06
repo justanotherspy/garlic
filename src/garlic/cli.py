@@ -325,7 +325,7 @@ def _parse_config_value(key: str, raw: str) -> object:
         if len(values) != len(set(values)):
             raise ValueError("nudge_thresholds_minutes must not contain duplicates")
         return values
-    if key in ("max_prompt_gap_minutes", "reset_hour"):
+    if key in ("max_prompt_gap_minutes", "max_generation_minutes", "reset_hour"):
         try:
             return int(raw)
         except ValueError:
