@@ -91,8 +91,12 @@ Edit `~/.garlic/config.toml` to customize:
 # Max thinking time (minutes) between Claude stopping and your next
 # prompt that still counts as active coding. If you take longer than
 # this, garlic assumes you stepped away and counts nothing for that gap.
-# Claude's generation time is always counted in full regardless of this.
 max_prompt_gap_minutes = 40
+
+# Max generation time (minutes) to count per response. If Claude runs
+# longer than this (hung process, forgotten session), the time is
+# clamped to this cap instead of inflating the daily total.
+max_generation_minutes = 120
 
 # Hour of day (0-23) when the daily timer resets.
 reset_hour = 2

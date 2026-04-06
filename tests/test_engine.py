@@ -132,11 +132,25 @@ def test_handle_stop_accumulates_generation_time():
     assert abs(state["accumulated_minutes"] - 33.0) < 0.01  # 30 + 3
 
 
-def test_handle_stop_counts_long_generation_in_full():
-    """Stop always counts generation time in full (no cap)."""
+def test_handle_stop_clamps_at_generation_cap():
+    """Stop clamps generation time at max_generation_minutes."""
+    now = 1710567900.0
+    # 6 hours ago — way beyond the 120-minute default cap
+    state = _make_state(accumulated_minutes=0.0, last_event_time=now - 6 * 3600)
+    config = _make_config(max_generation_minutes=120)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_stop(state, config)
+
+    assert abs(state["accumulated_minutes"] - 120.0) < 0.01  # clamped to cap
+
+
+def test_handle_stop_counts_normal_generation_in_full():
+    """Stop counts generation time under the cap in full."""
     now = 1710567900.0
     state = _make_state(accumulated_minutes=0.0, last_event_time=now - 3600)
-    config = _make_config(max_prompt_gap_minutes=10)
+    config = _make_config(max_generation_minutes=120)
 
     with patch("garlic.engine.time") as mock_time:
         mock_time.time.return_value = now

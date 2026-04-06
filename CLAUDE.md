@@ -83,6 +83,7 @@ Garlic tracks how much time a user spends actively coding with Claude Code each 
 ### Config defaults (`~/.garlic/config.toml`)
 ```toml
 max_prompt_gap_minutes = 40
+max_generation_minutes = 120
 reset_hour = 2
 nudge_thresholds_minutes = [30, 60, 90, 120, 150, 180, 210, 240]
 nudge_style = "gentle"
@@ -118,7 +119,7 @@ When `date` doesn't match the current day (accounting for `reset_hour`), state r
 
 ### Time tracking model
 - **Session start**: record timestamp as `last_event_time`
-- **Stop** (Claude finishes responding): compute gap = now − `last_event_time` (generation time). Always counted in full — generation time is unambiguously active coding. Add to `accumulated_minutes`. Update `last_event_time` to now.
+- **Stop** (Claude finishes responding): compute gap = now − `last_event_time` (generation time). Clamped to `max_generation_minutes` (default 120) to guard against hung processes. Add to `accumulated_minutes`. Update `last_event_time` to now.
 - **Prompt**: compute gap = now − `last_event_time` (reading/thinking time since Claude stopped). If gap exceeds `max_prompt_gap_minutes`, drop it (count 0 — user was away). Otherwise add to `accumulated_minutes`. Check thresholds; if a new one is crossed and not already in `nudges_given` and not `ignored`, output a nudge message to stdout and record the threshold.
 
 Both stop and prompt accumulate time — the full engagement cycle is counted: watching Claude generate + reading the response + thinking before the next prompt.
