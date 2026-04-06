@@ -16,6 +16,14 @@ def test_format_time_hours():
     assert _format_time(185) == "3h 05m"
 
 
+def test_format_time_rounding_never_produces_60m():
+    # 119.5 would produce "1h 60m" if rounding is applied after modulo
+    assert _format_time(119.5) == "2h 00m"
+    assert _format_time(59.5) == "1h 00m"
+    assert _format_time(59.4) == "59m"
+    assert _format_time(179.6) == "3h 00m"
+
+
 def test_get_nudge_contains_time():
     msg = get_nudge("gentle", 120)
     assert "2h 00m" in msg

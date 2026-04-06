@@ -91,8 +91,9 @@ POOLS = {
 
 def _format_time(minutes: float) -> str:
     """Format accumulated minutes as a human-readable string."""
-    hours = int(minutes // 60)
-    mins = round(minutes % 60)
+    total = round(minutes)
+    hours = total // 60
+    mins = total % 60
     if hours > 0:
         return f"{hours}h {mins:02d}m"
     return f"{mins}m"
