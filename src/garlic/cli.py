@@ -306,11 +306,25 @@ def _parse_config_value(key: str, raw: str) -> object:
         return raw
     if key == "nudge_thresholds_minutes":
         try:
-            return [int(x.strip()) for x in raw.split(",")]
+            values = [int(x.strip()) for x in raw.split(",")]
         except ValueError:
             raise ValueError(
                 "nudge_thresholds_minutes must be comma-separated integers (e.g. 60,120,180)"
             )
+        if not values:
+            raise ValueError("nudge_thresholds_minutes must not be empty")
+        if any(v <= 0 for v in values):
+            raise ValueError(
+                "nudge_thresholds_minutes values must be positive integers"
+            )
+        if values != sorted(values):
+            raise ValueError(
+                "nudge_thresholds_minutes must be in ascending order "
+                f"(got {','.join(map(str, values))}; did you mean {','.join(map(str, sorted(values)))}?)"
+            )
+        if len(values) != len(set(values)):
+            raise ValueError("nudge_thresholds_minutes must not contain duplicates")
+        return values
     if key in ("max_prompt_gap_minutes", "reset_hour"):
         try:
             return int(raw)
