@@ -45,6 +45,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: claude-execution-output
-          path: ${{ steps.claude-review.outputs.execution_file }}
+          path: ${{ steps.claude-review.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}
           if-no-files-found: warn
 
