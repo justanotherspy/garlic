@@ -79,6 +79,9 @@ garlic status
 # See your rolling 7-day usage summary
 garlic week
 
+# See monthly totals, streaks, and averages
+garlic stats
+
 # Disable nudging for the rest of the day (tracking continues)
 garlic ignore
 ```

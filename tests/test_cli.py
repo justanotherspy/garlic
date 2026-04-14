@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.metadata
+from datetime import datetime
 from unittest.mock import patch
 
 from garlic.cli import (
@@ -10,6 +11,7 @@ from garlic.cli import (
     _prompt_config,
     build_parser,
     cmd_setup,
+    cmd_stats,
     cmd_version,
 )
 
@@ -183,6 +185,126 @@ def test_cmd_setup_defaults_declined(capsys):
     mock_install.assert_not_called()
     out = capsys.readouterr().out
     assert "setup cancelled" in out
+
+
+def test_parser_stats():
+    parser = build_parser()
+    args = parser.parse_args(["stats"])
+    assert args.command == "stats"
+
+
+class _FixedDatetime(datetime):
+    """Datetime with a pinned `now()` for deterministic stats tests."""
+
+    _fixed: "datetime"
+
+    @classmethod
+    def now(cls, tz=None):  # type: ignore[override]
+        return cls._fixed
+
+
+def _write_state_with_history(state_path, today, accumulated, history):
+    """Overwrite state.toml with given date, today's minutes, and history."""
+    history_str = ", ".join(
+        f'{{date = "{e["date"]}", minutes = {e["minutes"]}}}' for e in history
+    )
+    state_path.write_text(
+        f'date = "{today}"\n'
+        f"accumulated_minutes = {accumulated}\n"
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        f"history = [{history_str}]\n"
+    )
+
+
+def test_cmd_stats_empty_history(garlic_env, capsys):
+    """With no history and no time today, stats shows zero streaks, no busiest day."""
+    _, _, state_path = garlic_env
+    _write_state_with_history(state_path, "2026-04-14", 0.0, [])
+
+    _FixedDatetime._fixed = datetime(2026, 4, 14, 10, 0, 0)
+    with patch("garlic.cli.datetime", _FixedDatetime):
+        cmd_stats(argparse.Namespace())
+
+    out = capsys.readouterr().out
+    assert "April 2026" in out
+    assert "This month:" in out
+    assert "0 active days" in out
+    assert "Current streak:" in out
+    assert "0 days" in out
+    # No busiest day when everything is zero
+    assert "Busiest day:" not in out
+
+
+def test_cmd_stats_aggregates_and_streaks(garlic_env, capsys):
+    """With populated history, stats computes totals, averages, streaks, busiest day."""
+    _, _, state_path = garlic_env
+    # Three consecutive days ending yesterday, plus 60m today
+    history = [
+        {"date": "2026-04-10", "minutes": 30.0},  # Fri
+        {"date": "2026-04-12", "minutes": 90.0},  # Sun
+        {"date": "2026-04-13", "minutes": 180.0},  # Mon (busiest)
+    ]
+    _write_state_with_history(state_path, "2026-04-14", 60.0, history)
+
+    _FixedDatetime._fixed = datetime(2026, 4, 14, 10, 0, 0)
+    with patch("garlic.cli.datetime", _FixedDatetime):
+        cmd_stats(argparse.Namespace())
+
+    out = capsys.readouterr().out
+    # Month total = 30 + 90 + 180 + 60 = 360 min = 6h 00m
+    assert "6h 00m" in out
+    # 4 active days this month
+    assert "4 active days" in out
+    # Busiest day was Mon 04/13 at 3h
+    assert "3h 00m" in out
+    assert "Mon Apr 13" in out
+    # Current streak: today (04-14), 04-13, 04-12 → 3 days (04-11 missing breaks)
+    assert "Current streak:      3 days" in out
+    # Longest streak: same 3 days
+    assert "Longest streak:      3 days" in out
+
+
+def test_cmd_stats_current_streak_excludes_today_when_zero(garlic_env, capsys):
+    """When today has no time yet, current streak looks back from yesterday."""
+    _, _, state_path = garlic_env
+    history = [
+        {"date": "2026-04-12", "minutes": 60.0},
+        {"date": "2026-04-13", "minutes": 60.0},
+    ]
+    _write_state_with_history(state_path, "2026-04-14", 0.0, history)
+
+    _FixedDatetime._fixed = datetime(2026, 4, 14, 10, 0, 0)
+    with patch("garlic.cli.datetime", _FixedDatetime):
+        cmd_stats(argparse.Namespace())
+
+    out = capsys.readouterr().out
+    # Streak ends yesterday: 2 days (04-13, 04-12)
+    assert "Current streak:      2 days" in out
+
+
+def test_cmd_stats_rolling_30d_window(garlic_env, capsys):
+    """Rolling-30d total excludes entries older than 30 days."""
+    _, _, state_path = garlic_env
+    history = [
+        # 40 days ago — outside the 30-day window
+        {"date": "2026-03-05", "minutes": 120.0},
+        # 10 days ago — inside the window
+        {"date": "2026-04-04", "minutes": 60.0},
+    ]
+    _write_state_with_history(state_path, "2026-04-14", 0.0, history)
+
+    _FixedDatetime._fixed = datetime(2026, 4, 14, 10, 0, 0)
+    with patch("garlic.cli.datetime", _FixedDatetime):
+        cmd_stats(argparse.Namespace())
+
+    out = capsys.readouterr().out
+    # Rolling 30d should only include 60 minutes (1h 00m), not 180
+    rolling_line = [l for l in out.splitlines() if "Rolling 30d" in l][0]
+    assert "1h 00m" in rolling_line
+    assert "1 active day" in rolling_line
 
 
 def test_cmd_setup_interactive_passes_overrides(capsys):

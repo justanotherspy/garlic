@@ -3,6 +3,7 @@
 import argparse
 import importlib.metadata
 import sys
+from datetime import datetime, timedelta
 
 from garlic.config import DEFAULTS, load_config, save_config
 from garlic.hooks import hook_prompt, hook_session_start, hook_stop
@@ -226,8 +227,6 @@ def cmd_status(args: argparse.Namespace) -> None:
 
 def cmd_week(args: argparse.Namespace) -> None:
     """Show a rolling 7-day usage summary."""
-    from datetime import datetime, timedelta
-
     config = load_config()
     state = load_state(config["reset_hour"])
 
@@ -277,6 +276,99 @@ def cmd_week(args: argparse.Namespace) -> None:
     target_str = _format_duration(target)
     total_str = _format_duration(total)
     print(f"\n  Total: {total_str} \u00b7 {under_target} of 7 days under {target_str} target")
+
+
+def cmd_stats(args: argparse.Namespace) -> None:
+    """Show higher-level stats: monthly totals, streaks, averages."""
+    config = load_config()
+    state = load_state(config["reset_hour"])
+
+    # Build date -> minutes map, including today's in-progress minutes
+    history_map: dict[str, float] = {}
+    for entry in state.get("history", []):
+        history_map[entry["date"]] = entry["minutes"]
+
+    now = datetime.now()
+    if now.hour < config["reset_hour"]:
+        now -= timedelta(days=1)
+    today_str = now.strftime("%Y-%m-%d")
+    today_minutes = state["accumulated_minutes"]
+    if today_minutes > 0:
+        history_map[today_str] = today_minutes
+
+    # This calendar month
+    month_prefix = now.strftime("%Y-%m")
+    month_entries = [m for d, m in history_map.items() if d.startswith(month_prefix)]
+    month_total = sum(month_entries)
+    month_active = [m for m in month_entries if m > 0]
+    month_avg = sum(month_active) / len(month_active) if month_active else 0.0
+
+    # Busiest day across all recorded history
+    busiest: tuple[str, float] | None = None
+    for d, m in history_map.items():
+        if m > 0 and (busiest is None or m > busiest[1]):
+            busiest = (d, m)
+
+    # Streaks — based on dates with any recorded time
+    active_dates = {d for d, m in history_map.items() if m > 0}
+
+    # Current streak: consecutive days ending today (or yesterday if today is 0)
+    current_streak = 0
+    cursor = now
+    if cursor.strftime("%Y-%m-%d") not in active_dates:
+        cursor -= timedelta(days=1)
+    while cursor.strftime("%Y-%m-%d") in active_dates:
+        current_streak += 1
+        cursor -= timedelta(days=1)
+
+    # Longest streak: scan sorted active dates for consecutive runs
+    longest_streak = 0
+    if active_dates:
+        sorted_dts = sorted(datetime.strptime(s, "%Y-%m-%d") for s in active_dates)
+        run = 1
+        longest_streak = 1
+        for i in range(1, len(sorted_dts)):
+            if (sorted_dts[i] - sorted_dts[i - 1]).days == 1:
+                run += 1
+                longest_streak = max(longest_streak, run)
+            else:
+                run = 1
+
+    # Rolling 30 days (inclusive of today)
+    thirty_ago = now - timedelta(days=29)
+    rolling_total = 0.0
+    rolling_active = 0
+    for d_str, m in history_map.items():
+        d_dt = datetime.strptime(d_str, "%Y-%m-%d")
+        if thirty_ago.date() <= d_dt.date() <= now.date():
+            rolling_total += m
+            if m > 0:
+                rolling_active += 1
+
+    # Output
+    month_label = now.strftime("%B %Y")
+    print(f"\U0001f9c4 Stats — {month_label}\n")
+    print(
+        f"  This month:      {_format_duration(month_total):>8s}"
+        f"   ({len(month_active)} active day{'s' if len(month_active) != 1 else ''})"
+    )
+    if month_active:
+        print(f"  Daily avg:       {_format_duration(month_avg):>8s}   (active days only)")
+    if busiest is not None:
+        b_dt = datetime.strptime(busiest[0], "%Y-%m-%d")
+        b_label = b_dt.strftime("%a %b %d")
+        print(f"  Busiest day:     {_format_duration(busiest[1]):>8s}   ({b_label})")
+    print(
+        f"  Current streak:  {current_streak:>5d} day{'s' if current_streak != 1 else ''}"
+    )
+    print(
+        f"  Longest streak:  {longest_streak:>5d} day{'s' if longest_streak != 1 else ''}"
+    )
+    print()
+    print(
+        f"  Rolling 30d:     {_format_duration(rolling_total):>8s}"
+        f"   ({rolling_active} active day{'s' if rolling_active != 1 else ''})"
+    )
 
 
 def cmd_ignore(args: argparse.Namespace) -> None:
@@ -413,6 +505,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Show accumulated active time today")
     sub.add_parser("week", help="Show rolling 7-day usage summary")
+    sub.add_parser("stats", help="Show monthly totals, streaks, and averages")
     sub.add_parser("ignore", help="Toggle nudging for the day")
 
     set_parser = sub.add_parser("set", help="Update a config value (KEY=VALUE)")
@@ -451,6 +544,7 @@ def main() -> None:
         "setup": cmd_setup,
         "status": cmd_status,
         "week": cmd_week,
+        "stats": cmd_stats,
         "ignore": cmd_ignore,
         "set": cmd_set,
         "reset": cmd_reset,
