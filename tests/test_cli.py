@@ -236,6 +236,8 @@ def test_cmd_stats_empty_history(garlic_env, capsys):
     assert "0 days" in out
     # No busiest day when everything is zero
     assert "Busiest day:" not in out
+    # Honesty footer: makes the 30-day bound visible
+    assert "last 30 days" in out
 
 
 def test_cmd_stats_aggregates_and_streaks(garlic_env, capsys):

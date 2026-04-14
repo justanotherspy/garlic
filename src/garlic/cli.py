@@ -148,6 +148,17 @@ def cmd_setup(args: argparse.Namespace) -> None:
         print("garlic: config reset to built-in defaults")
 
 
+_MONTH_NAMES = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+_MONTH_ABBR = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)
+_WEEKDAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
 def _format_duration(minutes: float) -> str:
     """Format minutes as a human-readable duration string."""
     hours = int(minutes // 60)
@@ -325,8 +336,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
     longest_streak = 0
     if active_dates:
         sorted_dts = sorted(datetime.strptime(s, "%Y-%m-%d") for s in active_dates)
-        run = 1
-        longest_streak = 1
+        longest_streak = run = 1
         for i in range(1, len(sorted_dts)):
             if (sorted_dts[i] - sorted_dts[i - 1]).days == 1:
                 run += 1
@@ -345,8 +355,8 @@ def cmd_stats(args: argparse.Namespace) -> None:
             if m > 0:
                 rolling_active += 1
 
-    # Output
-    month_label = now.strftime("%B %Y")
+    # Output — locale-independent via hardcoded English names
+    month_label = f"{_MONTH_NAMES[now.month - 1]} {now.year}"
     print(f"\U0001f9c4 Stats — {month_label}\n")
     print(
         f"  This month:      {_format_duration(month_total):>8s}"
@@ -356,7 +366,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
         print(f"  Daily avg:       {_format_duration(month_avg):>8s}   (active days only)")
     if busiest is not None:
         b_dt = datetime.strptime(busiest[0], "%Y-%m-%d")
-        b_label = b_dt.strftime("%a %b %d")
+        b_label = (
+            f"{_WEEKDAY_ABBR[b_dt.weekday()]} "
+            f"{_MONTH_ABBR[b_dt.month - 1]} {b_dt.day:02d}"
+        )
         print(f"  Busiest day:     {_format_duration(busiest[1]):>8s}   ({b_label})")
     print(
         f"  Current streak:  {current_streak:>5d} day{'s' if current_streak != 1 else ''}"
@@ -369,6 +382,10 @@ def cmd_stats(args: argparse.Namespace) -> None:
         f"  Rolling 30d:     {_format_duration(rolling_total):>8s}"
         f"   ({rolling_active} active day{'s' if rolling_active != 1 else ''})"
     )
+    # Honesty footer: garlic only retains the last 30 days of per-day history
+    # (see HISTORY_MAX in state.py), so busiest-day and streaks are bounded
+    # by that window — they cannot reflect activity older than ~30 days.
+    print("\n  Note: based on the last 30 days of history.")
 
 
 def cmd_ignore(args: argparse.Namespace) -> None:
