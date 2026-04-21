@@ -61,24 +61,48 @@ When working from a **Slack-initiated session** (via the Slack bot integration),
 
 For all other workflows (Claude Code CLI locally, web, or IDE), use the standard branch naming: `<issue-id>/<short-description>` or `claude/<issue-id>-<short-description>`.
 
-**Never push code directly to main.** The only exception is `make release`, which pushes release metadata (changelog, version bump) directly.
+**Never push code directly to main.**
 
 ## CI
 - CI runs automatically on every PR and push to `main` via `.github/workflows/ci.yml`.
 - It runs `uv sync` then `uv run pytest` against Python 3.11 and 3.12.
+- All GitHub Actions are pinned to full commit SHAs for supply chain security.
 
 ## Releasing
 
-Run `make release` from a clean, up-to-date main branch. It will:
-1. Checkout and pull latest main
-2. Run tests
-3. Bump the patch version
-4. Auto-generate `CHANGELOG.md` via `git-cliff`
-5. Commit, tag, and push to main
-6. Create a GitHub release with notes extracted from the changelog
-7. Publish to PyPI
+The release process uses GitHub Actions with OIDC trusted publishing to PyPI. No local PyPI tokens required.
 
-This is the **only** workflow that pushes directly to main.
+### Three-stage workflow
+
+1. **`make release BUMP=patch|minor|major`** — Creates a PR that bumps the version and updates the changelog
+2. **Merge the PR** — Release drafter automatically updates a draft GitHub release with notes from merged PRs
+3. **Publish the draft release** — GitHub Actions runs tests, then publishes to PyPI via OIDC
+
+### Step-by-step
+
+```bash
+# Create a release PR (defaults to patch bump)
+make release
+
+# Or specify the bump type
+make release BUMP=minor
+make release BUMP=major
+```
+
+After the PR is merged:
+1. Go to GitHub Releases → find the draft release
+2. Review the auto-generated release notes
+3. Click "Publish release" to trigger PyPI publish
+
+### Workflows
+
+- `.github/workflows/release-drafter.yml` — Updates draft release on push to main
+- `.github/workflows/release.yml` — Publishes to PyPI when a release is published
+- `.github/release-drafter.yml` — Configuration for release note categories
+
+### PyPI trusted publishing
+
+The `pypi` environment in GitHub Actions uses OIDC to authenticate with PyPI — no `PYPI_TOKEN` secret needed. This is configured in the PyPI project settings to trust this repository.
 
 ## Architecture
 
