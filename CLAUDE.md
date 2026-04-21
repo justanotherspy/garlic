@@ -47,10 +47,19 @@ Include the Linear issue ID in the description when working on a ticket (e.g. `f
 2. **Ensure main is up to date**: `git checkout main && git pull`
 3. **Create a feature branch**: `git checkout -b <issue-id>/<short-description>` (e.g. `JUS-42/add-feature`)
 4. **Implement, test, commit** using conventional commit messages. Update `README.md` if any user-facing behaviour changed.
-5. **Push and open a PR**: branch name and PR title must include the Linear issue ID (e.g. `JUS-42`). One issue per PR.
+5. **Push and open a PR**:
+   - **PR title** must start with the Linear issue ID: `JUS-XX: <description>` (e.g. `JUS-42: Add feature`)
+   - **PR description** must link to the Linear issue (e.g. `https://linear.app/justanotherspy/issue/JUS-42`)
+   - One issue per PR.
 6. **PR description** must have two sections: **Goal** (the problem/feature from the issue) and **Solution** (how it was implemented).
 7. **Wait for CI** — do not merge until green.
 8. **After the PR is merged**: Update the Linear issue status to Done, then `git checkout main && git pull`.
+
+### Branch naming exceptions
+
+When working from a **Slack-initiated session** (via the Slack bot integration), the branch name may be pre-assigned (e.g. `claude/slack-session-XXX`). This is acceptable — the Linear issue ID must still appear in the PR title and description.
+
+For all other workflows (Claude Code CLI locally, web, or IDE), use the standard branch naming: `<issue-id>/<short-description>` or `claude/<issue-id>-<short-description>`.
 
 **Never push code directly to main.** The only exception is `make release`, which pushes release metadata (changelog, version bump) directly.
 
@@ -174,9 +183,9 @@ Use appropriate labels to categorize work:
 ### Linking PRs to Issues
 
 When creating a PR, include the Linear issue ID in:
-- The branch name (e.g. `JUS-42/add-feature`)
-- The PR title (e.g. `feat: add feature (JUS-42)`)
-- The PR description
+- The branch name (e.g. `JUS-42/add-feature`) — unless working from a Slack-initiated session
+- The PR title: **must start with the issue ID** (e.g. `JUS-42: Add feature`)
+- The PR description: include a link to the Linear issue (e.g. `https://linear.app/justanotherspy/issue/JUS-42`)
 
 Linear will automatically link the PR when it detects the issue ID.
 
