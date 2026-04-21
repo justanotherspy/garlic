@@ -19,7 +19,7 @@ jobs:
     # Only draft releases on push to main, not on PRs
     if: github.event_name == 'push'
     steps:
-      - uses: release-drafter/release-drafter@e068f96816981ebf6ecf8a3c7e56a4ad82282163 # v7.1.0
+      - uses: release-drafter/release-drafter@5de93583980a40bd78603b6dfdcda5b4df377b32 # v7.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -31,6 +31,6 @@ jobs:
     # Auto-label PRs based on conventional commit titles
     if: github.event_name == 'pull_request'
     steps:
-      - uses: release-drafter/release-drafter@e068f96816981ebf6ecf8a3c7e56a4ad82282163 # v7.1.0
+      - uses: release-drafter/release-drafter@5de93583980a40bd78603b6dfdcda5b4df377b32 # v7.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
