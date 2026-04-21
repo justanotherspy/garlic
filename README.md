@@ -84,7 +84,18 @@ garlic stats
 
 # Disable nudging for the rest of the day (tracking continues)
 garlic ignore
+
+# Update a config value without editing the file
+garlic set nudge_style=spicy
+garlic set max_prompt_gap_minutes=60
+
+# Reset the daily timer to zero
+garlic reset
 ```
+
+### Slash command
+
+After running `garlic setup`, you can use `/garlic` directly in Claude Code to check your status without leaving the conversation.
 
 ## Configuration
 
@@ -117,7 +128,7 @@ nudge_style = "gentle"
 
 **No prompt injection risk.** The nudge messages output by garlic's hooks are hardcoded in the project. There is no mechanism for external input to influence what gets sent to your agent. You can audit every possible message in [`src/garlic/nudges.py`](src/garlic/nudges.py).
 
-**No third-party dependencies.** Garlic uses only the Python standard library. This is an intentional choice — it runs on every prompt you send, so the supply chain should be as small and auditable as possible.
+**No runtime dependencies.** Garlic uses only the Python standard library at runtime. Development dependencies (pytest, build, twine) exist for testing and releasing, but are not shipped with the package. This is an intentional choice — garlic runs on every prompt you send, so the supply chain should be as small and auditable as possible.
 
 **No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere.
 
