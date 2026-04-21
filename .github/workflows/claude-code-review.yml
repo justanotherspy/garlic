@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload Claude execution output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: claude-execution-output
           path: ${{ steps.claude-review.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}
