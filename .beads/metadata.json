@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "garlic",
-  "project_id": "7d537611-51c0-4e74-bc0b-dfe57247ce52"
-}
