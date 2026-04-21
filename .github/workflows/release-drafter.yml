@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, reopened, synchronize]
 
 permissions:
   contents: read
@@ -14,22 +12,8 @@ jobs:
   update-release-draft:
     permissions:
       contents: write
-      pull-requests: write
+      pull-requests: read
     runs-on: ubuntu-latest
-    # Only draft releases on push to main, not on PRs
-    if: github.event_name == 'push'
-    steps:
-      - uses: release-drafter/release-drafter@5de93583980a40bd78603b6dfdcda5b4df377b32 # v7.2.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  label-pr:
-    permissions:
-      contents: read
-      pull-requests: write
-    runs-on: ubuntu-latest
-    # Auto-label PRs based on conventional commit titles
-    if: github.event_name == 'pull_request'
     steps:
       - uses: release-drafter/release-drafter@5de93583980a40bd78603b6dfdcda5b4df377b32 # v7.2.0
         env:
