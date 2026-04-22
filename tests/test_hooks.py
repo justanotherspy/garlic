@@ -166,7 +166,10 @@ def test_hook_prompt_with_nudge(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert len(captured.out.strip()) > 0  # nudge was printed
-    assert captured.out.startswith("Please relay the following message")
+    response = json.loads(captured.out)
+    assert "hookSpecificOutput" in response
+    assert response["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert len(response["hookSpecificOutput"]["additionalContext"]) > 0
 
 
 def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
@@ -220,5 +223,8 @@ def test_hook_prompt_bedtime_nudge(monkeypatch, capsys):
         hook_prompt()
 
     captured = capsys.readouterr()
-    assert "Please relay the following message" in captured.out
     assert len(captured.out.strip()) > 0
+    response = json.loads(captured.out)
+    assert "hookSpecificOutput" in response
+    assert response["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
+    assert len(response["hookSpecificOutput"]["additionalContext"]) > 0
