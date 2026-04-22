@@ -12,7 +12,10 @@ on:
 
 jobs:
   claude-review:
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # Skip dependabot PRs and skip draft PRs on 'opened' event (review runs when marked ready)
+    if: |
+      github.event.pull_request.user.login != 'dependabot[bot]' &&
+      !(github.event.action == 'opened' && github.event.pull_request.draft)
 
     runs-on: ubuntu-latest
     permissions:
