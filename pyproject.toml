@@ -32,7 +32,5 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
-    "build>=1.4.0",
     "pytest>=8.0",
-    "twine>=6.2.0",
 ]
