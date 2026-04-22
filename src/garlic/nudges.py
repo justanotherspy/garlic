@@ -2,6 +2,8 @@
 
 import random
 
+from garlic._format import format_duration
+
 GENTLE = [
     "You've been coding for {time}. A short break might feel nice.",
     "Heads up — {time} of active coding today. Stretch your legs?",
@@ -89,19 +91,9 @@ POOLS = {
 }
 
 
-def _format_time(minutes: float) -> str:
-    """Format accumulated minutes as a human-readable string."""
-    total = round(minutes)
-    hours = total // 60
-    mins = total % 60
-    if hours > 0:
-        return f"{hours}h {mins:02d}m"
-    return f"{mins}m"
-
-
 def get_bedtime_nudge(accumulated_minutes: float) -> str:
     """Pick a random bedtime nudge message."""
-    time_str = _format_time(accumulated_minutes)
+    time_str = format_duration(accumulated_minutes)
     message = random.choice(BEDTIME)
     return message.format(time=time_str)
 
@@ -112,6 +104,6 @@ def get_nudge(style: str, accumulated_minutes: float, is_final: bool = False) ->
     If is_final is True, always uses the FINAL pool regardless of style.
     """
     pool = FINAL if is_final else POOLS.get(style, GENTLE)
-    time_str = _format_time(accumulated_minutes)
+    time_str = format_duration(accumulated_minutes)
     message = random.choice(pool)
     return message.format(time=time_str)
