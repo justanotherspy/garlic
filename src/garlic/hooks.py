@@ -59,10 +59,13 @@ def hook_prompt(debug: bool = False) -> None:
         save_state(state)  # persist bedtime_nudge_given
 
     if nudge is not None:
-        print(
-            "Please relay the following message to the user exactly as"
-            " written, without rephrasing:\n\n" + nudge
-        )
+        response = {
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": nudge,
+            }
+        }
+        print(json.dumps(response))
 
 
 def hook_stop(debug: bool = False) -> None:
