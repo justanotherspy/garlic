@@ -20,6 +20,7 @@ def garlic_env(garlic_env):
         'last_event_time = 1710567890.123\n'
         'nudges_given = [60]\n'
         'ignored = false\n'
+        'bedtime_nudge_given = true\n'
     )
 
     return garlic_dir, config_path, state_path
@@ -143,6 +144,7 @@ def test_cmd_reset_with_yes_flag(garlic_env, capsys):
     assert state["nudges_given"] == []
     assert state["ignored"] is False
     assert state["last_event_time"] == 0.0
+    assert state["bedtime_nudge_given"] is False
 
 
 def test_cmd_reset_confirmed(garlic_env, capsys, monkeypatch):
