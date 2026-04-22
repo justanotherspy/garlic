@@ -1,27 +1,6 @@
 """Tests for garlic.nudges."""
 
-from garlic.nudges import FINAL, POOLS, _format_time, get_nudge
-
-
-def test_format_time_minutes():
-    assert _format_time(30) == "30m"
-    assert _format_time(1) == "1m"
-
-
-def test_format_time_hours():
-    assert _format_time(60) == "1h 00m"
-    assert _format_time(89) == "1h 29m"
-    assert _format_time(90) == "1h 30m"
-    assert _format_time(120) == "2h 00m"
-    assert _format_time(185) == "3h 05m"
-
-
-def test_format_time_rounding_never_produces_60m():
-    # 119.5 would produce "1h 60m" if rounding is applied after modulo
-    assert _format_time(119.5) == "2h 00m"
-    assert _format_time(59.5) == "1h 00m"
-    assert _format_time(59.4) == "59m"
-    assert _format_time(179.6) == "3h 00m"
+from garlic.nudges import FINAL, POOLS, get_nudge
 
 
 def test_get_nudge_contains_time():

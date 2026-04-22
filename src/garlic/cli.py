@@ -5,6 +5,7 @@ import importlib.metadata
 import sys
 from datetime import datetime, timedelta
 
+from garlic._format import format_duration
 from garlic.config import DEFAULTS, load_config, save_config
 from garlic.hooks import hook_prompt, hook_session_start, hook_stop
 from garlic.setup import install_hooks
@@ -159,15 +160,6 @@ _MONTH_ABBR = (
 _WEEKDAY_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
-def _format_duration(minutes: float) -> str:
-    """Format minutes as a human-readable duration string."""
-    hours = int(minutes // 60)
-    mins = int(minutes % 60)
-    if hours > 0:
-        return f"{hours}h {mins:02d}m"
-    return f"{mins}m"
-
-
 def _progress_bar(fraction: float, width: int = 20) -> str:
     """Build an ASCII progress bar. fraction is 0.0–1.0+."""
     filled = min(int(fraction * width), width)
@@ -181,7 +173,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     state = load_state(config["reset_hour"])
 
     minutes = state["accumulated_minutes"]
-    time_str = _format_duration(minutes)
+    time_str = format_duration(minutes)
     thresholds = sorted(config.get("nudge_thresholds_minutes", []))
     nudges_given = state.get("nudges_given", [])
     ignored = state.get("ignored", False)
@@ -212,7 +204,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         # Crossed thresholds on one compact line
         crossed = [t for t in thresholds if t in nudges_given]
         if crossed:
-            marks = "  ".join(f"\u2716 {_format_duration(t)}" for t in crossed)
+            marks = "  ".join(f"\u2716 {format_duration(t)}" for t in crossed)
             print(f"  {marks}")
 
         # All thresholds passed
@@ -226,14 +218,14 @@ def cmd_status(args: argparse.Namespace) -> None:
                 span = next_t - prev_t
                 progress = (minutes - prev_t) / span if span > 0 else 1.0
                 bar = _progress_bar(progress)
-                remaining = _format_duration(max(next_t - minutes, 0))
-                print(f"  {bar} {_format_duration(next_t)} ({remaining} to go)")
+                remaining = format_duration(max(next_t - minutes, 0))
+                print(f"  {bar} {format_duration(next_t)} ({remaining} to go)")
 
             # Day progress bar (0 to max threshold)
             max_t = thresholds[-1]
             day_fraction = minutes / max_t if max_t > 0 else 1.0
             day_bar = _progress_bar(day_fraction)
-            print(f"  {day_bar} {_format_duration(max_t)} day")
+            print(f"  {day_bar} {format_duration(max_t)} day")
 
 
 def cmd_week(args: argparse.Namespace) -> None:
@@ -275,7 +267,7 @@ def cmd_week(args: argparse.Namespace) -> None:
     for date_str, minutes in days:
         d = datetime.strptime(date_str, "%Y-%m-%d")
         day_label = d.strftime("%a %m/%d")
-        time_str = _format_duration(minutes)
+        time_str = format_duration(minutes)
         fraction = minutes / bar_max if bar_max > 0 else 0.0
         bar = _progress_bar(fraction, width=16)
         marker = "  \u2190 today" if date_str == today_str else ""
@@ -284,8 +276,8 @@ def cmd_week(args: argparse.Namespace) -> None:
         if minutes < target:
             under_target += 1
 
-    target_str = _format_duration(target)
-    total_str = _format_duration(total)
+    target_str = format_duration(target)
+    total_str = format_duration(total)
     print(f"\n  Total: {total_str} \u00b7 {under_target} of 7 days under {target_str} target")
 
 
@@ -359,18 +351,18 @@ def cmd_stats(args: argparse.Namespace) -> None:
     month_label = f"{_MONTH_NAMES[now.month - 1]} {now.year}"
     print(f"\U0001f9c4 Stats — {month_label}\n")
     print(
-        f"  This month:      {_format_duration(month_total):>8s}"
+        f"  This month:      {format_duration(month_total):>8s}"
         f"   ({len(month_active)} active day{'s' if len(month_active) != 1 else ''})"
     )
     if month_active:
-        print(f"  Daily avg:       {_format_duration(month_avg):>8s}   (active days only)")
+        print(f"  Daily avg:       {format_duration(month_avg):>8s}   (active days only)")
     if busiest is not None:
         b_dt = datetime.strptime(busiest[0], "%Y-%m-%d")
         b_label = (
             f"{_WEEKDAY_ABBR[b_dt.weekday()]} "
             f"{_MONTH_ABBR[b_dt.month - 1]} {b_dt.day:02d}"
         )
-        print(f"  Busiest day:     {_format_duration(busiest[1]):>8s}   ({b_label})")
+        print(f"  Busiest day:     {format_duration(busiest[1]):>8s}   ({b_label})")
     print(
         f"  Current streak:  {current_streak:>5d} day{'s' if current_streak != 1 else ''}"
     )
@@ -379,7 +371,7 @@ def cmd_stats(args: argparse.Namespace) -> None:
     )
     print()
     print(
-        f"  Rolling 30d:     {_format_duration(rolling_total):>8s}"
+        f"  Rolling 30d:     {format_duration(rolling_total):>8s}"
         f"   ({rolling_active} active day{'s' if rolling_active != 1 else ''})"
     )
     # Honesty footer: garlic only retains the last 30 days of per-day history
