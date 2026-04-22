@@ -484,6 +484,7 @@ def cmd_reset(args: argparse.Namespace) -> None:
     state["nudges_given"] = []
     state["ignored"] = False
     state["last_event_time"] = 0.0
+    state["bedtime_nudge_given"] = False
     save_state(state)
     print("garlic: timer reset for today")
 
