@@ -120,10 +120,10 @@ def test_hook_stop(monkeypatch):
 def test_hook_prompt_no_nudge(monkeypatch, capsys):
     """prompt accumulates time but no nudge when below threshold."""
     now = 1710567900.0
-    saved = {}
+    saves = []
 
     def fake_save(state):
-        saved.update(state)
+        saves.append(dict(state))
 
     monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
     monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
@@ -139,16 +139,17 @@ def test_hook_prompt_no_nudge(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""  # no nudge
-    assert saved["accumulated_minutes"] > 0
+    assert len(saves) == 1  # JUS-14: one save per prompt
+    assert saves[-1]["accumulated_minutes"] > 0
 
 
 def test_hook_prompt_with_nudge(monkeypatch, capsys):
     """prompt outputs nudge when threshold crossed."""
     now = 1710567900.0
-    saved = {}
+    saves = []
 
     def fake_save(state):
-        saved.update(state)
+        saves.append(dict(state))
 
     monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
     monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
@@ -170,11 +171,17 @@ def test_hook_prompt_with_nudge(monkeypatch, capsys):
     assert "hookSpecificOutput" in response
     assert response["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert len(response["hookSpecificOutput"]["additionalContext"]) > 0
+    assert len(saves) == 1  # JUS-14: one save per prompt
+    assert 60 in saves[-1]["nudges_given"]
 
 
 def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
     """prompt suppresses nudge when ignored=true."""
     now = 1710567900.0
+    saves = []
+
+    def fake_save(state):
+        saves.append(dict(state))
 
     monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
     monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
@@ -184,7 +191,7 @@ def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
             accumulated_minutes=58.0, last_event_time=now - 300, ignored=True
         ),
     )
-    monkeypatch.setattr("garlic.hooks.save_state", lambda s: None)
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
 
     with patch("garlic.engine.time") as mock_time:
         mock_time.time.return_value = now
@@ -192,6 +199,7 @@ def test_hook_prompt_ignored_no_nudge(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert captured.out == ""  # nudge suppressed
+    assert len(saves) == 1  # JUS-14: one save per prompt
 
 
 def test_hook_prompt_bedtime_nudge(monkeypatch, capsys):
@@ -199,10 +207,10 @@ def test_hook_prompt_bedtime_nudge(monkeypatch, capsys):
     from datetime import datetime
 
     now = 1710567900.0
-    saved = {}
+    saves = []
 
     def fake_save(state):
-        saved.update(state)
+        saves.append(dict(state))
 
     monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
     monkeypatch.setattr(
@@ -228,3 +236,5 @@ def test_hook_prompt_bedtime_nudge(monkeypatch, capsys):
     assert "hookSpecificOutput" in response
     assert response["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert len(response["hookSpecificOutput"]["additionalContext"]) > 0
+    assert len(saves) == 1  # JUS-14: bedtime branch must not double-save
+    assert saves[-1]["bedtime_nudge_given"] is True
