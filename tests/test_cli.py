@@ -143,6 +143,17 @@ def test_prompt_config_invalid_values_use_defaults(capsys):
     assert out.count("invalid") == 4
 
 
+def test_prompt_config_default_interval_tracks_config():
+    """The displayed default nudge interval is derived from DEFAULTS, not hardcoded."""
+    from garlic.config import DEFAULTS
+
+    expected_default = DEFAULTS["nudge_thresholds_minutes"][0]
+    with patch("builtins.input", return_value="") as mock_input:
+        _prompt_config()
+    first_prompt = mock_input.call_args_list[0].args[0]
+    assert f"[{expected_default}]" in first_prompt
+
+
 def test_cmd_setup_yes_skips_prompts(capsys):
     """--yes flag skips interactive prompts entirely."""
     args = argparse.Namespace(yes=True, debug=False, defaults=False)
