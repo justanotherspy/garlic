@@ -63,7 +63,7 @@ def _prompt_config() -> dict[str, object]:
     print("garlic setup — configure your preferences (press Enter for defaults)\n")
 
     # nudge_thresholds_minutes — ask as a single "nudge interval" for simplicity
-    default_interval = 30
+    default_interval = DEFAULTS["nudge_thresholds_minutes"][0]
     raw = input(f"  Nudge interval in minutes [{default_interval}]: ").strip()
     if raw:
         try:
