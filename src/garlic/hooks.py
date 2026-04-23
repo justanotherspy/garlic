@@ -46,7 +46,6 @@ def hook_prompt(debug: bool = False) -> None:
     config = load_config()
     state = load_state(config["reset_hour"])
     threshold = handle_prompt(state, config, debug=debug)
-    save_state(state)
 
     nudge = None
 
@@ -56,7 +55,8 @@ def hook_prompt(debug: bool = False) -> None:
         nudge = get_nudge(config["nudge_style"], state["accumulated_minutes"], is_final=is_final)
     elif not state.get("ignored", False) and check_bedtime(state, config):
         nudge = get_bedtime_nudge(state["accumulated_minutes"])
-        save_state(state)  # persist bedtime_nudge_given
+
+    save_state(state)
 
     if nudge is not None:
         response = {
