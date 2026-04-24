@@ -1,4 +1,4 @@
-# CLAUDE.md — garlic developer guide
+# CLAUDE.md
 
 See `README.md` for what garlic does, its config, and the project layout.
 
@@ -33,15 +33,14 @@ Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If o
 
 **PR:**
 - Title starts with the Linear ID when there is one.
-- Body has **Goal** and **Solution** sections.
+- Body has **Goal** and **Solution** sections. No **Test Plan** section
 - One issue per PR.
 - Update `README.md` in feature PRs so docs stay current.
-- Wait for green CI before merging.
 
 **Never push directly to main.**
 
 ## CI
-`.github/workflows/ci.yml` runs `uv sync` + `uv run pytest` on Python 3.11 and 3.12. Pin all actions to full commit SHAs.
+Pin all actions to full commit SHAs.
 
 ## Releasing
 1. `make release BUMP=patch|minor|major` opens a version-bump + changelog PR.
