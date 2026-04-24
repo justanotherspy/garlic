@@ -4,7 +4,7 @@ import io
 import json
 from unittest.mock import patch
 
-from garlic.hooks import hook_prompt, hook_session_start, hook_stop
+from garlic.hooks import hook_prompt, hook_session_end, hook_session_start, hook_stop
 
 
 def _make_stdin(data=None):
@@ -115,6 +115,31 @@ def test_hook_stop(monkeypatch):
 
     assert saved["last_event_time"] == now
     assert abs(saved["accumulated_minutes"] - 32.0) < 0.01  # 30 + 2
+
+
+def test_hook_session_end(monkeypatch):
+    """session-end finalizes outstanding time and clears last_event_time."""
+    now = 1710567900.0
+    saved = {}
+
+    def fake_save(state):
+        saved.update(state)
+
+    monkeypatch.setattr("garlic.hooks.sys.stdin", _make_stdin())
+    monkeypatch.setattr("garlic.hooks.load_config", lambda: _make_config())
+    monkeypatch.setattr(
+        "garlic.hooks.load_state",
+        # last_event_time 2 minutes ago — session killed mid-generation
+        lambda rh: _make_state(accumulated_minutes=30.0, last_event_time=now - 120),
+    )
+    monkeypatch.setattr("garlic.hooks.save_state", fake_save)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        hook_session_end()
+
+    assert abs(saved["accumulated_minutes"] - 32.0) < 0.01  # 30 + 2m accumulated
+    assert saved["last_event_time"] == 0.0  # cleared so next session starts clean
 
 
 def test_hook_prompt_no_nudge(monkeypatch, capsys):

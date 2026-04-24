@@ -124,6 +124,29 @@ nudge_thresholds_minutes = [30, 60, 90, 120, 150, 180, 210, 240]
 nudge_style = "gentle"
 ```
 
+## Project layout
+
+Source modules in `src/garlic/`:
+
+- `cli.py` — argparse entry point and subcommand dispatch
+- `config.py` — loads/creates `~/.garlic/config.toml` with defaults
+- `state.py` — reads/writes `~/.garlic/state.toml` under `fcntl.flock`, handles daily reset
+- `engine.py` — gap calculation, accumulation, threshold checking
+- `nudges.py` — hardcoded gentle/firm/spicy message pools
+- `hooks.py` — handlers for the `session-start`, `prompt`, and `stop` hook subcommands
+- `setup.py` — installs/updates hooks in `~/.claude/settings.json`
+
+Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, `fcntl`-locked for concurrent sessions).
+
+Claude Code hooks written to `~/.claude/settings.json` by `garlic setup`:
+
+- **SessionStart** (matcher `"startup"`) → `garlic hook session-start`
+- **UserPromptSubmit** → `garlic hook prompt`
+- **Stop** → `garlic hook stop`
+- **SessionEnd** → `garlic hook session-end` — finalizes in-flight generation time and clears `last_event_time` so a crashed or killed session can't leak time into the next one
+
+Each hook reads JSON from stdin and either writes plain text to stdout (a nudge) or exits silently.
+
 ## Things I should know?
 
 **No prompt injection risk.** The nudge messages output by garlic's hooks are hardcoded in the project. There is no mechanism for external input to influence what gets sent to your agent. You can audit every possible message in [`src/garlic/nudges.py`](src/garlic/nudges.py).

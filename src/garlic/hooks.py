@@ -5,7 +5,13 @@ import sys
 from typing import Any
 
 from garlic.config import load_config
-from garlic.engine import check_bedtime, handle_prompt, handle_session_start, handle_stop
+from garlic.engine import (
+    check_bedtime,
+    handle_prompt,
+    handle_session_end,
+    handle_session_start,
+    handle_stop,
+)
 from garlic.nudges import get_bedtime_nudge, get_nudge
 from garlic.state import load_state, save_state
 
@@ -74,4 +80,13 @@ def hook_stop(debug: bool = False) -> None:
     config = load_config()
     state = load_state(config["reset_hour"])
     handle_stop(state, config, debug=debug)
+    save_state(state)
+
+
+def hook_session_end(debug: bool = False) -> None:
+    """Handle SessionEnd hook: finalize in-flight time and clear last_event_time."""
+    _read_hook_input()
+    config = load_config()
+    state = load_state(config["reset_hour"])
+    handle_session_end(state, config, debug=debug)
     save_state(state)

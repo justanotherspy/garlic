@@ -33,6 +33,11 @@ def test_install_hooks_creates_settings(tmp_path, monkeypatch):
     assert st["matcher"] == ""
     assert st["hooks"][0]["command"] == "garlic hook stop"
 
+    assert len(hooks["SessionEnd"]) == 1
+    se = hooks["SessionEnd"][0]
+    assert se["matcher"] == ""
+    assert se["hooks"][0]["command"] == "garlic hook session-end"
+
 
 def test_install_hooks_idempotent(tmp_path, monkeypatch):
     """Running setup twice doesn't duplicate hooks."""
@@ -45,7 +50,7 @@ def test_install_hooks_idempotent(tmp_path, monkeypatch):
     install_hooks()
 
     settings = json.loads(settings_path.read_text())
-    for event in ("SessionStart", "UserPromptSubmit", "Stop"):
+    for event in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
         assert len(settings["hooks"][event]) == 1
 
 

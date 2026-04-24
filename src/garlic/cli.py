@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 from garlic._format import format_duration
 from garlic.config import DEFAULTS, load_config, save_config
-from garlic.hooks import hook_prompt, hook_session_start, hook_stop
+from garlic.hooks import hook_prompt, hook_session_end, hook_session_start, hook_stop
 from garlic.setup import install_hooks
 from garlic.state import load_state, save_state
 
@@ -487,6 +487,7 @@ def cmd_hook(args: argparse.Namespace) -> None:
         "session-start": hook_session_start,
         "prompt": hook_prompt,
         "stop": hook_stop,
+        "session-end": hook_session_end,
     }
     dispatch[args.hook_event](debug=args.debug)
 
@@ -531,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
     hook_parser = sub.add_parser("hook", help="Handle a Claude Code hook event")
     hook_parser.add_argument(
         "hook_event",
-        choices=["session-start", "prompt", "stop"],
+        choices=["session-start", "prompt", "stop", "session-end"],
         help="Which hook event to handle",
     )
     hook_parser.add_argument(

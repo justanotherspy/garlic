@@ -71,6 +71,36 @@ def handle_session_start(state: dict[str, Any]) -> None:
     state["last_event_time"] = time.time()
 
 
+def handle_session_end(
+    state: dict[str, Any], config: dict[str, Any], debug: bool = False
+) -> None:
+    """Process a session-end event: finalize in-flight time and clear last_event_time.
+
+    If the session was killed mid-generation (SIGTERM, crash, network loss), Stop
+    never fires. Without this handler, last_event_time would stay set and the next
+    session's first prompt would compute a huge gap. This accumulates the outstanding
+    gap (clamped to max_generation_minutes) and zeroes last_event_time.
+    """
+    now = time.time()
+    last = state.get("last_event_time", 0.0)
+
+    if last > 0:
+        raw_gap = (now - last) / 60.0
+        cap = config.get("max_generation_minutes", 120)
+        gap_minutes = min(raw_gap, cap)
+        state["accumulated_minutes"] += gap_minutes
+
+        if debug:
+            clamped = " → clamped to {:.0f}m cap".format(cap) if raw_gap > cap else ""
+            print(
+                f"[garlic debug] session-end gap: {raw_gap:.2f}m{clamped}"
+                + f" | total: {state['accumulated_minutes']:.2f}m",
+                file=sys.stderr,
+            )
+
+    state["last_event_time"] = 0.0
+
+
 def _check_thresholds(
     state: dict[str, Any], config: dict[str, Any]
 ) -> int | None:
