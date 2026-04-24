@@ -22,6 +22,16 @@ def test_parser_version():
     assert args.command == "version"
 
 
+def test_parser_version_flag(capsys):
+    parser = build_parser()
+    try:
+        parser.parse_args(["--version"])
+    except SystemExit as exc:
+        assert exc.code == 0
+    out = capsys.readouterr().out.strip()
+    assert out == f"garlic {importlib.metadata.version('garlic-cli')}"
+
+
 def test_cmd_version_output(capsys):
     """Version prints current version; update check is silent when no update."""
     with patch("garlic.cli._check_latest_version", return_value=None):

@@ -1,9 +1,10 @@
 # CLAUDE.md
 
-See `README.md` for what garlic does, its config, and the project layout.
+See @README.md for what garlic does, its config, and the project layout.
 
 ## Package management
 Use `uv` — never `pip`/`pip3`/`pipx`. `uv sync` to install, `uv run <cmd>` to run, `uv add [--dev] <pkg>` to add deps.
+Read @Makefile for make targets
 
 ## Philosophy
 **Standard library first.** Third-party runtime deps have a high bar — discuss before adding.
@@ -32,6 +33,7 @@ git checkout -b <issue-id>/<short-description>
 Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If one is supplied, it must be used.
 
 **PR:**
+- Always open as a draft PR
 - Title starts with the Linear ID when there is one.
 - Body has **Goal** and **Solution** sections. No **Test Plan** section
 - One issue per PR.

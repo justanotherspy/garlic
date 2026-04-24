@@ -1,4 +1,4 @@
-.PHONY: help build clean test bump changelog release
+.PHONY: help build clean test release
 
 # Default bump type (patch, minor, major)
 BUMP ?= patch
@@ -8,8 +8,6 @@ help:
 	@echo "  build       - Build sdist and wheel into dist/"
 	@echo "  clean       - Remove dist/"
 	@echo "  test        - Run tests"
-	@echo "  bump        - Increment version (BUMP=patch|minor|major, default: patch)"
-	@echo "  changelog   - Regenerate CHANGELOG.md from commit history"
 	@echo "  release     - Create version bump PR (BUMP=patch|minor|major)"
 	@echo ""
 	@echo "Release workflow:"
@@ -25,12 +23,6 @@ clean:
 
 test:
 	uv run pytest
-
-bump:
-	uv version --bump $(BUMP)
-
-changelog:
-	git-cliff -o CHANGELOG.md
 
 release:
 	@echo "==> Checking for clean working tree" && \
