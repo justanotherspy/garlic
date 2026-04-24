@@ -497,6 +497,11 @@ def build_parser() -> argparse.ArgumentParser:
         prog="garlic",
         description="Track active coding time with Claude Code",
     )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"garlic {importlib.metadata.version('garlic-cli')}",
+    )
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("version", help="Show installed version")
