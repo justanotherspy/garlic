@@ -2,7 +2,13 @@
 
 from unittest.mock import patch
 
-from garlic.engine import check_bedtime, handle_prompt, handle_session_start, handle_stop
+from garlic.engine import (
+    check_bedtime,
+    handle_prompt,
+    handle_session_end,
+    handle_session_start,
+    handle_stop,
+)
 
 
 def _make_config(**overrides):
@@ -171,6 +177,76 @@ def test_handle_stop_no_accumulation_without_last_event():
 
     assert state["last_event_time"] == now
     assert state["accumulated_minutes"] == 0.0
+
+
+def test_handle_session_end_accumulates_and_clears_last_event():
+    """session-end accumulates the outstanding gap and zeroes last_event_time."""
+    now = 1710567900.0
+    state = _make_state(accumulated_minutes=30.0, last_event_time=now - 180)
+    config = _make_config(max_generation_minutes=120)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_session_end(state, config)
+
+    assert abs(state["accumulated_minutes"] - 33.0) < 0.01  # 30 + 3m
+    assert state["last_event_time"] == 0.0
+
+
+def test_handle_session_end_clamps_at_generation_cap():
+    """A session killed mid-generation is clamped to max_generation_minutes."""
+    now = 1710567900.0
+    # last_event_time was 6 hours ago — way beyond the 120-minute cap
+    state = _make_state(accumulated_minutes=0.0, last_event_time=now - 6 * 3600)
+    config = _make_config(max_generation_minutes=120)
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_session_end(state, config)
+
+    assert abs(state["accumulated_minutes"] - 120.0) < 0.01
+    assert state["last_event_time"] == 0.0
+
+
+def test_handle_session_end_no_last_event_still_clears():
+    """session-end with no prior last_event_time accumulates nothing but still clears."""
+    now = 1710567900.0
+    state = _make_state(accumulated_minutes=5.0, last_event_time=0.0)
+    config = _make_config()
+
+    with patch("garlic.engine.time") as mock_time:
+        mock_time.time.return_value = now
+        handle_session_end(state, config)
+
+    assert state["accumulated_minutes"] == 5.0
+    assert state["last_event_time"] == 0.0
+
+
+def test_session_killed_before_stop_does_not_double_count_next_session():
+    """JUS-18: without session-end, a killed session would leak time into the next prompt."""
+    base = 1710567900.0
+    config = _make_config(max_prompt_gap_minutes=40, max_generation_minutes=120)
+
+    # Session 1: prompt at T=0, then killed mid-generation (no Stop hook ever fires)
+    state = _make_state(last_event_time=base)
+
+    # SessionEnd fires 5 minutes later — finalizes the 5m of generation and clears.
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 5)
+        handle_session_end(state, config)
+    assert abs(state["accumulated_minutes"] - 5.0) < 0.01
+    assert state["last_event_time"] == 0.0
+
+    # Session 2 opens 2 hours later. The first prompt must not accumulate a huge gap.
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 120)
+        handle_session_start(state)
+    with patch("garlic.engine.time") as mt:
+        mt.time.return_value = _at(base, 123)  # 3m into the new session
+        handle_prompt(state, config)
+
+    # Only the 3m of the new session's reading/thinking added on top of the 5m.
+    assert abs(state["accumulated_minutes"] - 8.0) < 0.01
 
 
 def test_handle_session_start_records_timestamp():

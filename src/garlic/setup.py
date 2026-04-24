@@ -23,6 +23,7 @@ _HOOK_DEFINITIONS = [
     ("SessionStart", "startup", "garlic hook session-start"),
     ("UserPromptSubmit", "", "garlic hook prompt"),
     ("Stop", "", "garlic hook stop"),
+    ("SessionEnd", "", "garlic hook session-end"),
 ]
 
 
