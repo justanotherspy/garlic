@@ -36,17 +36,14 @@ release:
 	echo "==> Bumping $(BUMP) version" && \
 	uv version --bump $(BUMP) && \
 	NEW_VERSION=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/') && \
-	echo "==> Generating changelog for v$$NEW_VERSION" && \
-	git-cliff --tag "v$$NEW_VERSION" -o CHANGELOG.md && \
-	echo "==> Committing release v$$NEW_VERSION" && \
-	git add CHANGELOG.md pyproject.toml uv.lock && \
+	git add pyproject.toml uv.lock && \
 	git commit -m "chore(release): v$$NEW_VERSION" && \
 	echo "==> Pushing branch" && \
 	git push -u origin HEAD && \
 	echo "==> Creating pull request" && \
 	gh pr create \
 		--title "chore(release): v$$NEW_VERSION" \
-		--body "Bump version to v$$NEW_VERSION and update changelog." \
+		--body "Bump version to v$$NEW_VERSION." \
 		--label "release" && \
 	echo "==> Release PR created for v$$NEW_VERSION" && \
 	echo "==> Next steps:" && \

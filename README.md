@@ -156,3 +156,11 @@ Each hook reads JSON from stdin and either writes plain text to stdout (a nudge)
 **No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere.
 
 **Built with Claude.** This project was built with Claude Code, which is fitting given what it does.
+
+## Release process
+
+- Run `make release BUMP=patch|minor|major`
+- Merge release PR
+- Draft release updates
+- Publish release 
+- Release workflow runs
