@@ -17,7 +17,14 @@ _GARLIC_CLAUDE_MD_BLOCK = """\
 If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
 """
 
-GARLIC_COMMAND = "Run `garlic status` and show the output to me.\n"
+GARLIC_COMMAND = """\
+---
+description: Show accumulated active coding time today
+argument-hint: "[status|week|stats|ignore]"
+allowed-tools: Bash(garlic:*)
+---
+Run `garlic $ARGUMENTS` (or `garlic status` if no arg) and show the output to me.
+"""
 
 _HOOK_DEFINITIONS = [
     ("SessionStart", "startup", "garlic hook session-start"),

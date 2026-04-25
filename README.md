@@ -101,7 +101,12 @@ garlic reset
 
 ### Slash command
 
-After running `garlic setup`, you can use `/garlic` directly in Claude Code to check your status without leaving the conversation.
+After running `garlic setup`, you can use `/garlic` directly in Claude Code without leaving the conversation. It supports all garlic subcommands:
+
+- `/garlic` or `/garlic status` — show today's accumulated time
+- `/garlic week` — show rolling 7-day summary
+- `/garlic stats` — show monthly totals and streaks
+- `/garlic ignore` — disable nudging for the rest of the day
 
 ### Status line
 
