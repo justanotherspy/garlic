@@ -46,10 +46,9 @@ Setup interactively prompts for key preferences (nudge interval, max prompt gap,
 garlic setup -y
 ```
 
-This does three things:
+This does two things:
 1. Creates `~/.garlic/config.toml` (with your chosen settings or sensible defaults)
 2. Adds garlic's hooks to `~/.claude/settings.json` so they run across all your projects
-3. Appends a nudge-relay instruction to `~/.claude/CLAUDE.md` so Claude always relays garlic's nudge messages verbatim as the last line of its response
 
 To reset your config to the latest built-in defaults (useful after upgrading):
 

@@ -12,11 +12,6 @@ CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CLAUDE_COMMANDS_DIR = Path.home() / ".claude" / "commands"
 CLAUDE_MD_PATH = Path.home() / ".claude" / "CLAUDE.md"
 
-_GARLIC_CLAUDE_MD_BLOCK = """\
-## garlic
-If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
-"""
-
 GARLIC_COMMAND = """\
 ---
 description: Show accumulated active coding time today
@@ -112,8 +107,9 @@ def install_hooks(
     # Install /garlic slash command globally
     install_slash_command()
 
-    # Install nudge-relay instruction into ~/.claude/CLAUDE.md
-    install_claude_md()
+    # Remove legacy CLAUDE.md injection if present
+    if cleanup_claude_md():
+        print("removed legacy CLAUDE.md injection")
 
 
 def install_slash_command() -> None:
@@ -123,10 +119,45 @@ def install_slash_command() -> None:
     command_path.write_text(GARLIC_COMMAND)
 
 
-def install_claude_md() -> None:
-    """Append garlic nudge-relay instruction to ~/.claude/CLAUDE.md (idempotent)."""
-    CLAUDE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
-    existing = CLAUDE_MD_PATH.read_text() if CLAUDE_MD_PATH.exists() else ""
-    if "## garlic" not in existing:
-        separator = "\n" if existing and not existing.endswith("\n") else ""
-        CLAUDE_MD_PATH.write_text(existing + separator + _GARLIC_CLAUDE_MD_BLOCK)
+def cleanup_claude_md() -> bool:
+    """Remove legacy garlic nudge-relay block from ~/.claude/CLAUDE.md if present.
+
+    Returns True if the block was found and removed, False otherwise.
+    """
+    if not CLAUDE_MD_PATH.exists():
+        return False
+
+    content = CLAUDE_MD_PATH.read_text()
+
+    # Look for the legacy "## garlic" block
+    if "## garlic" not in content:
+        return False
+
+    # Remove the block (match the section header and everything until the next section or EOF)
+    lines = content.split("\n")
+    cleaned_lines = []
+    in_garlic_section = False
+
+    for line in lines:
+        # Start of garlic section
+        if line.strip().startswith("## garlic"):
+            in_garlic_section = True
+            continue
+        # End of garlic section (next section header or end)
+        if in_garlic_section and line.strip().startswith("#"):
+            in_garlic_section = False
+        # Skip lines in garlic section
+        if in_garlic_section:
+            continue
+        cleaned_lines.append(line)
+
+    # Remove trailing blank lines that might have been left
+    while cleaned_lines and not cleaned_lines[-1].strip():
+        cleaned_lines.pop()
+
+    cleaned_content = "\n".join(cleaned_lines)
+    if cleaned_content and not cleaned_content.endswith("\n"):
+        cleaned_content += "\n"
+
+    CLAUDE_MD_PATH.write_text(cleaned_content)
+    return True
