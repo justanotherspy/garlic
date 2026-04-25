@@ -49,12 +49,15 @@ Pin all actions to full commit SHAs.
 **When a CI check fails**, always fetch the logs before drawing conclusions:
 ```bash
 # List failed runs for the PR
-gh run list --branch <branch> --status failure
+gh run list --branch <branch> --status failure --repo justanotherspy/garlic
 
-# View the full log of a specific run/job
-gh run view <run-id> --log-failed
+# View the summary and failed steps of a specific run
+gh run view <run-id> --repo justanotherspy/garlic
+
+# Stream the full failed-step logs
+gh run view <run-id> --log-failed --repo justanotherspy/garlic
 ```
-Read the actual error output — don't guess the cause from the check name alone.
+Always pass `--repo justanotherspy/garlic` — the local git remote is not a GitHub host so gh cannot infer it. Read the actual error output — don't guess the cause from the check name alone.
 
 ## Releasing
 1. `make release BUMP=patch|minor|major` opens a version-bump + changelog PR.
