@@ -3,7 +3,7 @@
 import json
 from unittest.mock import patch
 
-from garlic.setup import install_claude_md, install_hooks
+from garlic.setup import cleanup_claude_md, install_hooks
 
 
 def test_install_hooks_creates_settings(tmp_path, monkeypatch):
@@ -102,39 +102,79 @@ def test_install_hooks_atomic_preserves_file_on_write_failure(tmp_path, monkeypa
     assert settings_path.read_text() == original_text
 
 
-def test_install_claude_md_creates_file(tmp_path, monkeypatch):
-    """Creates CLAUDE.md with garlic block when it doesn't exist."""
+def test_cleanup_claude_md_no_file(tmp_path, monkeypatch):
+    """Returns False when CLAUDE.md doesn't exist."""
     claude_md = tmp_path / ".claude" / "CLAUDE.md"
     monkeypatch.setattr("garlic.setup.CLAUDE_MD_PATH", claude_md)
 
-    install_claude_md()
+    result = cleanup_claude_md()
 
-    content = claude_md.read_text()
-    assert "## garlic" in content
-    assert "relay it verbatim" in content
+    assert result is False
 
 
-def test_install_claude_md_appends_to_existing(tmp_path, monkeypatch):
-    """Appends garlic block to an existing CLAUDE.md."""
+def test_cleanup_claude_md_no_garlic_block(tmp_path, monkeypatch):
+    """Returns False when CLAUDE.md exists but has no garlic block."""
     claude_md = tmp_path / ".claude" / "CLAUDE.md"
     claude_md.parent.mkdir(parents=True)
     claude_md.write_text("# My rules\n\nDo stuff.\n")
     monkeypatch.setattr("garlic.setup.CLAUDE_MD_PATH", claude_md)
 
-    install_claude_md()
+    result = cleanup_claude_md()
 
-    content = claude_md.read_text()
-    assert content.startswith("# My rules")
-    assert "## garlic" in content
+    assert result is False
+    assert claude_md.read_text() == "# My rules\n\nDo stuff.\n"
 
 
-def test_install_claude_md_idempotent(tmp_path, monkeypatch):
-    """Running install_claude_md twice doesn't duplicate the block."""
+def test_cleanup_claude_md_removes_legacy_block(tmp_path, monkeypatch):
+    """Removes the legacy garlic block and returns True."""
     claude_md = tmp_path / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    content = """# My rules
+
+Do stuff.
+
+## garlic
+If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
+
+## Other section
+More rules.
+"""
+    claude_md.write_text(content)
     monkeypatch.setattr("garlic.setup.CLAUDE_MD_PATH", claude_md)
 
-    install_claude_md()
-    install_claude_md()
+    result = cleanup_claude_md()
 
-    content = claude_md.read_text()
-    assert content.count("## garlic") == 1
+    assert result is True
+    cleaned = claude_md.read_text()
+    assert "## garlic" not in cleaned
+    assert "relay it verbatim" not in cleaned
+    assert "# My rules" in cleaned
+    assert "Do stuff." in cleaned
+    assert "## Other section" in cleaned
+    assert "More rules." in cleaned
+
+
+def test_cleanup_claude_md_removes_block_at_eof(tmp_path, monkeypatch):
+    """Removes garlic block at EOF and trims trailing blanks."""
+    claude_md = tmp_path / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    content = """# My rules
+
+Do stuff.
+
+## garlic
+If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
+"""
+    claude_md.write_text(content)
+    monkeypatch.setattr("garlic.setup.CLAUDE_MD_PATH", claude_md)
+
+    result = cleanup_claude_md()
+
+    assert result is True
+    cleaned = claude_md.read_text()
+    assert "## garlic" not in cleaned
+    assert "relay it verbatim" not in cleaned
+    assert "# My rules" in cleaned
+    assert "Do stuff." in cleaned
+    # Should end with a single newline, no trailing blanks
+    assert cleaned == "# My rules\n\nDo stuff.\n"
