@@ -105,14 +105,10 @@ After running `garlic setup`, you can use `/garlic` directly in Claude Code to c
 
 ### Status line
 
-Display a compact garlic summary in Claude Code's built-in status bar by adding `statusLine.command` to `~/.claude/settings.json`:
+To wire garlic into Claude Code's built-in status bar, run this in Claude Code:
 
-```json
-{
-  "statusLine": {
-    "command": "garlic statusline"
-  }
-}
+```
+/statusline add the output of the `garlic statusline` command to our status line
 ```
 
 This shows a single-line readout like `🧄 2h 15m / 4h` — your accumulated time and daily target — refreshed on each Claude Code event.
