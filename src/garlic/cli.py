@@ -15,6 +15,7 @@ from garlic.state import load_state, save_state
 def _check_latest_version(current: str) -> str | None:
     """Fetch the latest garlic-cli version from PyPI. Returns it if newer, else None."""
     import json as _json
+    import ssl
     import urllib.request
 
     try:
@@ -22,7 +23,8 @@ def _check_latest_version(current: str) -> str | None:
             "https://pypi.org/pypi/garlic-cli/json",
             headers={"Accept": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=3) as resp:
+        ctx = ssl.create_default_context()
+        with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
             data = _json.loads(resp.read())
         latest = data["info"]["version"]
         if _parse_version(latest) > _parse_version(current):
