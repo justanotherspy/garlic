@@ -6,6 +6,7 @@ from typing import Any
 
 GARLIC_DIR = Path.home() / ".garlic"
 CONFIG_PATH = GARLIC_DIR / "config.toml"
+VERSION_CACHE_PATH = GARLIC_DIR / "version_cache.toml"
 
 DEFAULTS: dict[str, Any] = {
     "max_prompt_gap_minutes": 40,

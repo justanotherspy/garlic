@@ -56,13 +56,15 @@ def test_parse_version():
     assert _parse_version("1.0.0") > _parse_version("0.99.99")
 
 
-def test_check_latest_version_network_failure():
-    """Network errors return None silently."""
+def test_check_latest_version_network_failure(tmp_path):
+    """Network errors return None silently and do not write a cache file."""
+    cache = tmp_path / "version_cache.toml"
     with patch("urllib.request.urlopen", side_effect=OSError("no network")):
-        assert _check_latest_version("0.1.0") is None
+        assert _check_latest_version("0.1.0", cache_path=cache) is None
+    assert not cache.exists()
 
 
-def test_check_latest_version_newer():
+def test_check_latest_version_newer(tmp_path):
     """Returns latest version string when PyPI has a newer release."""
     import io
     import json
@@ -72,11 +74,12 @@ def test_check_latest_version_newer():
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = lambda s, *a: None
 
+    cache = tmp_path / "version_cache.toml"
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        assert _check_latest_version("0.1.0") == "99.0.0"
+        assert _check_latest_version("0.1.0", cache_path=cache) == "99.0.0"
 
 
-def test_check_latest_version_not_newer():
+def test_check_latest_version_not_newer(tmp_path):
     """Returns None when installed version is current."""
     import io
     import json
@@ -86,8 +89,98 @@ def test_check_latest_version_not_newer():
     mock_resp.__enter__ = lambda s: s
     mock_resp.__exit__ = lambda s, *a: None
 
+    cache = tmp_path / "version_cache.toml"
     with patch("urllib.request.urlopen", return_value=mock_resp):
-        assert _check_latest_version("0.1.0") is None
+        assert _check_latest_version("0.1.0", cache_path=cache) is None
+
+
+def test_check_latest_version_writes_cache_on_success(tmp_path):
+    """A successful network check writes a cache file with checked_at and latest_version."""
+    import io
+    import json
+    import tomllib
+
+    payload = json.dumps({"info": {"version": "99.0.0"}}).encode()
+    mock_resp = io.BytesIO(payload)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = lambda s, *a: None
+
+    cache = tmp_path / "version_cache.toml"
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        _check_latest_version("0.1.0", cache_path=cache)
+
+    assert cache.exists()
+    with cache.open("rb") as f:
+        data = tomllib.load(f)
+    assert data["latest_version"] == "99.0.0"
+    assert data["checked_at"] > 0
+
+
+def test_check_latest_version_writes_empty_latest_when_current(tmp_path):
+    """When installed version is current, cache stores empty latest_version."""
+    import io
+    import json
+    import tomllib
+
+    payload = json.dumps({"info": {"version": "0.1.0"}}).encode()
+    mock_resp = io.BytesIO(payload)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = lambda s, *a: None
+
+    cache = tmp_path / "version_cache.toml"
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        _check_latest_version("0.1.0", cache_path=cache)
+
+    with cache.open("rb") as f:
+        data = tomllib.load(f)
+    assert data["latest_version"] == ""
+
+
+def test_check_latest_version_uses_cache_when_fresh(tmp_path):
+    """A fresh cache is returned without making a network call."""
+    import time
+
+    cache = tmp_path / "version_cache.toml"
+    cache.write_text(f'checked_at = {time.time()}\nlatest_version = "5.0.0"\n')
+
+    with patch("urllib.request.urlopen", side_effect=AssertionError("should not call network")):
+        result = _check_latest_version("0.1.0", cache_path=cache)
+
+    assert result == "5.0.0"
+
+
+def test_check_latest_version_cache_empty_latest_returns_none(tmp_path):
+    """A fresh cache with empty latest_version returns None (version is current)."""
+    import time
+
+    cache = tmp_path / "version_cache.toml"
+    cache.write_text(f'checked_at = {time.time()}\nlatest_version = ""\n')
+
+    with patch("urllib.request.urlopen", side_effect=AssertionError("should not call network")):
+        result = _check_latest_version("0.1.0", cache_path=cache)
+
+    assert result is None
+
+
+def test_check_latest_version_ignores_stale_cache(tmp_path):
+    """A cache older than 24 h triggers a fresh network call."""
+    import io
+    import json
+    import time
+
+    stale_ts = time.time() - 25 * 3600  # 25 hours ago
+    cache = tmp_path / "version_cache.toml"
+    cache.write_text(f'checked_at = {stale_ts}\nlatest_version = "1.0.0"\n')
+
+    payload = json.dumps({"info": {"version": "99.0.0"}}).encode()
+    mock_resp = io.BytesIO(payload)
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = lambda s, *a: None
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        result = _check_latest_version("0.1.0", cache_path=cache)
+
+    assert result == "99.0.0"
 
 
 def test_parser_setup():
