@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.metadata
+import json
 from datetime import datetime
 from unittest.mock import patch
 
@@ -12,6 +13,7 @@ from garlic.cli import (
     build_parser,
     cmd_setup,
     cmd_stats,
+    cmd_status,
     cmd_version,
 )
 
@@ -202,6 +204,116 @@ def test_parser_status():
     parser = build_parser()
     args = parser.parse_args(["status"])
     assert args.command == "status"
+    assert args.json is False
+
+
+def test_parser_status_json_flag():
+    parser = build_parser()
+    args = parser.parse_args(["status", "--json"])
+    assert args.json is True
+
+
+def test_cmd_status_json_output(garlic_env, capsys):
+    """--json emits the stable schema with correct types and values."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [30, 60, 90]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 45.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = [30]\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    args = argparse.Namespace(json=True)
+    cmd_status(args)
+
+    out = capsys.readouterr().out.strip()
+    data = json.loads(out)
+    assert data["accumulated_minutes"] == 45.0
+    assert data["thresholds"] == [30, 60, 90]
+    assert data["nudges_given"] == [30]
+    assert data["next_threshold"] == 60
+    assert data["ignored"] is False
+    assert data["date"] == "2026-04-25"
+
+
+def test_cmd_status_json_all_thresholds_crossed(garlic_env, capsys):
+    """next_threshold is null when all thresholds are crossed."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [30, 60]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 75.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = [30, 60]\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    args = argparse.Namespace(json=True)
+    cmd_status(args)
+
+    out = capsys.readouterr().out.strip()
+    data = json.loads(out)
+    assert data["next_threshold"] is None
+
+
+def test_cmd_status_json_ignored(garlic_env, capsys):
+    """ignored field reflects state correctly."""
+    _, config_path, state_path = garlic_env
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 10.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = true\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    args = argparse.Namespace(json=True)
+    cmd_status(args)
+
+    out = capsys.readouterr().out.strip()
+    data = json.loads(out)
+    assert data["ignored"] is True
+
+
+def test_cmd_status_json_no_pretty_output(garlic_env, capsys):
+    """--json produces only valid JSON, no human-readable lines."""
+    _, _, state_path = garlic_env
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 0.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    args = argparse.Namespace(json=True)
+    cmd_status(args)
+
+    out = capsys.readouterr().out.strip()
+    # Must be parseable as JSON and nothing else
+    data = json.loads(out)
+    assert isinstance(data, dict)
+    assert len(out.splitlines()) == 1
 
 
 def test_parser_ignore():

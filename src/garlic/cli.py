@@ -2,6 +2,7 @@
 
 import argparse
 import importlib.metadata
+import json
 import sys
 import time
 from datetime import datetime, timedelta
@@ -218,10 +219,23 @@ def cmd_status(args: argparse.Namespace) -> None:
     state = load_state(config["reset_hour"])
 
     minutes = state["accumulated_minutes"]
-    time_str = format_duration(minutes)
     thresholds = sorted(config.get("nudge_thresholds_minutes", []))
     nudges_given = state.get("nudges_given", [])
     ignored = state.get("ignored", False)
+    next_threshold = next((t for t in thresholds if t not in nudges_given), None)
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "accumulated_minutes": minutes,
+            "thresholds": thresholds,
+            "nudges_given": nudges_given,
+            "next_threshold": next_threshold,
+            "ignored": ignored,
+            "date": state.get("date", ""),
+        }))
+        return
+
+    time_str = format_duration(minutes)
 
     # Header — ignored state is front and center if active
     if ignored:
@@ -564,7 +578,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Overwrite existing config with built-in defaults",
     )
 
-    sub.add_parser("status", help="Show accumulated active time today")
+    status_parser = sub.add_parser("status", help="Show accumulated active time today")
+    status_parser.add_argument(
+        "--json", action="store_true", help="Emit status as a JSON object"
+    )
     sub.add_parser("week", help="Show rolling 7-day usage summary")
     sub.add_parser("stats", help="Show monthly totals, streaks, and averages")
     sub.add_parser("ignore", help="Toggle nudging for the day")
