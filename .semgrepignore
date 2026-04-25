@@ -1,0 +1,11 @@
+# Build and distribution artifacts
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+
+# Compiled bytecode
+__pycache__/
+*.pyc

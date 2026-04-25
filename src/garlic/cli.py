@@ -20,7 +20,7 @@ def _check_latest_version(current: str) -> str | None:
 
     try:
         ctx = ssl.create_default_context()
-        with urllib.request.urlopen(  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        with urllib.request.urlopen(
             "https://pypi.org/pypi/garlic-cli/json", timeout=3, context=ctx
         ) as resp:
             data = _json.loads(resp.read())
