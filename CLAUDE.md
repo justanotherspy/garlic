@@ -25,6 +25,8 @@ git checkout main && git pull
 git checkout -b <issue-id>/<short-description>
 ```
 
+**Issue tracking: Linear only.** This project uses [Linear](https://linear.app/justanotherspy) as its issue tracker — **never GitHub Issues**. When searching for MCP tools to look up or update issues, always use the Linear MCP tools, not the GitHub `mcp__github__issue_*` tools.
+
 **If a Linear ticket is supplied:**
 1. Read the ticket via the Linear MCP tools.
 2. If it isn't already "In Progress", move it to "In Progress" *before* writing code or opening a PR.
@@ -43,6 +45,16 @@ Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If o
 
 ## CI
 Pin all actions to full commit SHAs.
+
+**When a CI check fails**, always fetch the logs before drawing conclusions:
+```bash
+# List failed runs for the PR
+gh run list --branch <branch> --status failure --repo justanotherspy/garlic
+
+# View the summary and failed steps of a specific run
+gh run view <run-id> --repo justanotherspy/garlic
+```
+Read the actual error output — don't guess the cause from the check name alone.
 
 ## Releasing
 1. `make release BUMP=patch|minor|major` opens a version-bump + changelog PR.

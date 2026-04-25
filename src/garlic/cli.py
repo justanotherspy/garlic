@@ -3,21 +3,52 @@
 import argparse
 import importlib.metadata
 import sys
+import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from garlic._format import format_duration
-from garlic.config import DEFAULTS, load_config, save_config
+from garlic.config import DEFAULTS, VERSION_CACHE_PATH, load_config, save_config
 from garlic.hooks import hook_prompt, hook_session_end, hook_session_start, hook_stop
 from garlic.setup import install_hooks
 from garlic.state import load_state, save_state
 
 
-def _check_latest_version(current: str) -> str | None:
-    """Fetch the latest garlic-cli version from PyPI. Returns it if newer, else None."""
+_VERSION_CACHE_TTL = 24 * 3600  # seconds
+
+
+def _check_latest_version(
+    current: str, cache_path: Path | None = None
+) -> str | None:
+    """Fetch the latest garlic-cli version from PyPI. Returns it if newer, else None.
+
+    The result is cached in VERSION_CACHE_PATH for 24 hours so repeated
+    invocations of `garlic version` don't hit PyPI every time.
+    """
     import json as _json
     import ssl
+    import tomllib
     import urllib.request
 
+    if cache_path is None:
+        cache_path = VERSION_CACHE_PATH
+
+    # Return cached result if it is still fresh.
+    if cache_path.exists():
+        try:
+            with cache_path.open("rb") as f:
+                cached = tomllib.load(f)
+            age = time.time() - float(cached.get("checked_at", 0.0))
+            if age < _VERSION_CACHE_TTL:
+                v = cached.get("latest_version", "")
+                return v if v else None
+        except Exception:
+            pass
+
+    # Live network check.
+    latest_to_cache = ""
+    result = None
+    network_ok = False
     try:
         ctx = ssl.create_default_context()
         with urllib.request.urlopen(  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
@@ -25,11 +56,25 @@ def _check_latest_version(current: str) -> str | None:
         ) as resp:
             data = _json.loads(resp.read())
         latest = data["info"]["version"]
+        network_ok = True
         if _parse_version(latest) > _parse_version(current):
-            return latest
+            latest_to_cache = latest
+            result = latest
     except Exception:
         pass
-    return None
+
+    # Persist the result so the next 24 h use the cache, not the network.
+    if network_ok:
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                f"checked_at = {time.time()}\n"
+                f'latest_version = "{latest_to_cache}"\n'
+            )
+        except Exception:
+            pass
+
+    return result
 
 
 def _parse_version(v: str) -> tuple[int, ...]:

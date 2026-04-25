@@ -37,9 +37,13 @@ def garlic_env(tmp_path, monkeypatch):
         'history = []\n'
     )
 
+    version_cache_path = garlic_dir / "version_cache.toml"
+
     monkeypatch.setattr("garlic.config.GARLIC_DIR", garlic_dir)
     monkeypatch.setattr("garlic.config.CONFIG_PATH", config_path)
+    monkeypatch.setattr("garlic.config.VERSION_CACHE_PATH", version_cache_path)
     monkeypatch.setattr("garlic.state.GARLIC_DIR", garlic_dir)
     monkeypatch.setattr("garlic.state.STATE_PATH", state_path)
+    monkeypatch.setattr("garlic.cli.VERSION_CACHE_PATH", version_cache_path)
 
     return garlic_dir, config_path, state_path
