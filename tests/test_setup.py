@@ -152,3 +152,29 @@ More rules.
     assert "Do stuff." in cleaned
     assert "## Other section" in cleaned
     assert "More rules." in cleaned
+
+
+def test_cleanup_claude_md_removes_block_at_eof(tmp_path, monkeypatch):
+    """Removes garlic block at EOF and trims trailing blanks."""
+    claude_md = tmp_path / ".claude" / "CLAUDE.md"
+    claude_md.parent.mkdir(parents=True)
+    content = """# My rules
+
+Do stuff.
+
+## garlic
+If a garlic nudge appears in a system-reminder, relay it verbatim as the last line of your response, after all work is complete. Never skip it. Only relay each distinct nudge once per conversation — do not repeat the same message on subsequent responses.
+"""
+    claude_md.write_text(content)
+    monkeypatch.setattr("garlic.setup.CLAUDE_MD_PATH", claude_md)
+
+    result = cleanup_claude_md()
+
+    assert result is True
+    cleaned = claude_md.read_text()
+    assert "## garlic" not in cleaned
+    assert "relay it verbatim" not in cleaned
+    assert "# My rules" in cleaned
+    assert "Do stuff." in cleaned
+    # Should end with a single newline, no trailing blanks
+    assert cleaned == "# My rules\n\nDo stuff.\n"
