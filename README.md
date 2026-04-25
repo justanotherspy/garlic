@@ -1,5 +1,11 @@
 # Garlic 🧄 — the AI Vampire 🧛 Warding Tool
 
+[![CI](https://github.com/justanotherspy/garlic/workflows/CI/badge.svg)](https://github.com/justanotherspy/garlic/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/garlic-cli.svg)](https://pypi.org/project/garlic-cli/)
+[![Python versions](https://img.shields.io/pypi/pyversions/garlic-cli.svg)](https://pypi.org/project/garlic-cli/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Downloads](https://static.pepy.tech/badge/garlic-cli)](https://pepy.tech/project/garlic-cli)
+
 Garlic is used to ward off vampires. According to Steve Yegge, AI tools have a vampiric effect on us, draining us of energy and making us tired and exhausted. Not because they are not good at coding, or do not make us much more productive, but simply because we get dopamine for getting stuff done quicker, leading us to work longer and think harder. In short, we need to touch grass. Instead of going hard for 12 hours straight with our coding agent of choice and burning ourselves out to only create value for our employer, we should be mindful of the $/hr formula and consider a new balance. He estimates there are no more than 3-4 hours of good work that we can do in a day with all this uplift without burning our own candles a little too brightly. As someone quite sensitive to the effects of extended dopamine release on the mind and body, I tend to agree with him. So I created `garlic`, a CLI tool that helps you keep the draining to a minimum and maintain your own energy levels so we can continue to be healthy little worker bees for years to come.
 
 The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/the-ai-vampire-eda6e4f07163).
