@@ -76,6 +76,9 @@ garlic version
 # See how long you have been Clauding today
 garlic status
 
+# Output status as JSON (for scripting and statusline integrations)
+garlic status --json
+
 # See your rolling 7-day usage summary
 garlic week
 
