@@ -180,3 +180,4 @@ Each hook reads JSON from stdin and either writes plain text to stdout (a nudge)
 - Draft release updates
 - Publish release 
 - Release workflow runs
+- Must approve deploy to pypi in run
