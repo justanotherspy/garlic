@@ -14,6 +14,7 @@ from garlic.cli import (
     cmd_setup,
     cmd_stats,
     cmd_status,
+    cmd_statusline,
     cmd_version,
 )
 
@@ -545,3 +546,154 @@ def test_cmd_setup_interactive_passes_overrides(capsys):
     call_kwargs = mock_install.call_args[1]
     assert call_kwargs["config_overrides"]["nudge_thresholds_minutes"] == [60, 120, 180, 240]
     assert call_kwargs["config_overrides"]["nudge_style"] == "firm"
+
+
+def test_parser_statusline():
+    parser = build_parser()
+    args = parser.parse_args(["statusline"])
+    assert args.command == "statusline"
+
+
+def test_cmd_statusline_basic(garlic_env, capsys):
+    """Outputs format: icon time / max_threshold."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [60, 120, 180, 240]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 45.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert out == "\U0001f9c4 45m / 4h 00m"
+
+
+def test_cmd_statusline_vampire_icon(garlic_env, capsys):
+    """Uses vampire icon when accumulated >= 85% of next threshold."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [60, 120]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 51.0\n'  # 51/60 = 85%
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert out.startswith("\U0001f9db")
+
+
+def test_cmd_statusline_all_thresholds_crossed(garlic_env, capsys):
+    """When all thresholds are crossed fraction is 1.0, so vampire icon shown."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [60, 120]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 130.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = [60, 120]\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert out == "\U0001f9db 2h 10m / 2h 00m"
+
+
+def test_cmd_statusline_ignored(garlic_env, capsys):
+    """Appends (paused) when nudging is ignored."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = [60, 120]\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 30.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = true\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert out == "\U0001f9c4 30m / 2h 00m (paused)"
+
+
+def test_cmd_statusline_no_thresholds(garlic_env, capsys):
+    """With no thresholds configured, omits the / denominator."""
+    _, config_path, state_path = garlic_env
+    config_path.write_text(
+        'max_prompt_gap_minutes = 40\n'
+        'reset_hour = 2\n'
+        'nudge_thresholds_minutes = []\n'
+        'nudge_style = "gentle"\n'
+    )
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 90.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert out == "\U0001f9db 1h 30m"
+    assert "/" not in out
+
+
+def test_cmd_statusline_single_line(garlic_env, capsys):
+    """Output is always exactly one line."""
+    _, _, state_path = garlic_env
+    state_path.write_text(
+        'date = "2026-04-25"\n'
+        'accumulated_minutes = 75.0\n'
+        'last_event_time = 0.0\n'
+        'nudges_given = []\n'
+        'ignored = false\n'
+        'bedtime_nudge_given = false\n'
+        'history = []\n'
+    )
+
+    cmd_statusline(argparse.Namespace())
+
+    out = capsys.readouterr().out.strip()
+    assert len(out.splitlines()) == 1

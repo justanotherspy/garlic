@@ -79,6 +79,9 @@ garlic status
 # Output status as JSON (for scripting and statusline integrations)
 garlic status --json
 
+# Output a compact single-line string for the Claude Code status bar
+garlic statusline
+
 # See your rolling 7-day usage summary
 garlic week
 
@@ -99,6 +102,20 @@ garlic reset
 ### Slash command
 
 After running `garlic setup`, you can use `/garlic` directly in Claude Code to check your status without leaving the conversation.
+
+### Status line
+
+Display a compact garlic summary in Claude Code's built-in status bar by adding `statusLine.command` to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "garlic statusline"
+  }
+}
+```
+
+This shows a single-line readout like `🧄 2h 15m / 4h` — your accumulated time and daily target — refreshed on each Claude Code event.
 
 ## Configuration
 

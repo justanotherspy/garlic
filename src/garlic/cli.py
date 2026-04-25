@@ -287,6 +287,33 @@ def cmd_status(args: argparse.Namespace) -> None:
             print(f"  {day_bar} {format_duration(max_t)} day")
 
 
+def cmd_statusline(args: argparse.Namespace) -> None:
+    """Output a compact single-line string for the Claude Code status bar."""
+    config = load_config()
+    state = load_state(config["reset_hour"])
+
+    minutes = state["accumulated_minutes"]
+    thresholds = sorted(config.get("nudge_thresholds_minutes", []))
+    nudges_given = state.get("nudges_given", [])
+    ignored = state.get("ignored", False)
+
+    time_str = format_duration(minutes)
+
+    next_t = next((t for t in thresholds if t not in nudges_given), None)
+    fraction = (minutes / next_t) if next_t else 1.0
+    icon = "\U0001f9db" if fraction >= 0.85 else "\U0001f9c4"
+
+    if thresholds:
+        line = f"{icon} {time_str} / {format_duration(thresholds[-1])}"
+    else:
+        line = f"{icon} {time_str}"
+
+    if ignored:
+        line += " (paused)"
+
+    print(line)
+
+
 def cmd_week(args: argparse.Namespace) -> None:
     """Show a rolling 7-day usage summary."""
     config = load_config()
@@ -582,6 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument(
         "--json", action="store_true", help="Emit status as a JSON object"
     )
+    sub.add_parser("statusline", help="Output a compact status line string for Claude Code")
     sub.add_parser("week", help="Show rolling 7-day usage summary")
     sub.add_parser("stats", help="Show monthly totals, streaks, and averages")
     sub.add_parser("ignore", help="Toggle nudging for the day")
@@ -621,6 +649,7 @@ def main() -> None:
         "version": cmd_version,
         "setup": cmd_setup,
         "status": cmd_status,
+        "statusline": cmd_statusline,
         "week": cmd_week,
         "stats": cmd_stats,
         "ignore": cmd_ignore,
