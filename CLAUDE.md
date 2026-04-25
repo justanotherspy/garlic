@@ -25,6 +25,8 @@ git checkout main && git pull
 git checkout -b <issue-id>/<short-description>
 ```
 
+**Issue tracking: Linear only.** This project uses [Linear](https://linear.app/justanotherspy) as its issue tracker — **never GitHub Issues**. When searching for MCP tools to look up or update issues, always use the Linear MCP tools, not the GitHub `mcp__github__issue_*` tools.
+
 **If a Linear ticket is supplied:**
 1. Read the ticket via the Linear MCP tools.
 2. If it isn't already "In Progress", move it to "In Progress" *before* writing code or opening a PR.
