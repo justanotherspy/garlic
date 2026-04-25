@@ -19,12 +19,10 @@ def _check_latest_version(current: str) -> str | None:
     import urllib.request
 
     try:
-        req = urllib.request.Request(
-            "https://pypi.org/pypi/garlic-cli/json",
-            headers={"Accept": "application/json"},
-        )
         ctx = ssl.create_default_context()
-        with urllib.request.urlopen(req, timeout=3, context=ctx) as resp:
+        with urllib.request.urlopen(
+            "https://pypi.org/pypi/garlic-cli/json", timeout=3, context=ctx
+        ) as resp:
             data = _json.loads(resp.read())
         latest = data["info"]["version"]
         if _parse_version(latest) > _parse_version(current):
