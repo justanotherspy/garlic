@@ -83,3 +83,46 @@ jobs:
           name: claude-execution-output
           path: ${{ steps.claude-review.outputs.execution_file || '/home/runner/work/_temp/claude-execution-output.json' }}
           if-no-files-found: warn
+
+      - name: Post cost comment
+        if: always()
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const execFile = process.env.EXECUTION_FILE;
+            if (!execFile || !fs.existsSync(execFile)) {
+              core.info('No execution file found, skipping cost comment');
+              return;
+            }
+            const log = JSON.parse(fs.readFileSync(execFile, 'utf8'));
+            const result = log.find(m => m.type === 'result');
+            if (!result) {
+              core.info('No result message in execution log');
+              return;
+            }
+            const cost = result.total_cost_usd?.toFixed(4) ?? 'unknown';
+            const usage = result.usage ?? {};
+            const inp = (usage.input_tokens ?? 0).toLocaleString();
+            const out = (usage.output_tokens ?? 0).toLocaleString();
+            const cacheRead = (usage.cache_read_input_tokens ?? 0).toLocaleString();
+            const cacheWrite = (usage.cache_creation_input_tokens ?? 0).toLocaleString();
+            const body = [
+              `🤖 **Claude review cost: $${cost}**`,
+              '',
+              '| | Tokens |',
+              '|---|---|',
+              `| Input | ${inp} |`,
+              `| Output | ${out} |`,
+              `| Cache read | ${cacheRead} |`,
+              `| Cache write | ${cacheWrite} |`,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
