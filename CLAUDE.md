@@ -40,6 +40,7 @@ Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If o
 - Body has **Goal** and **Solution** sections. No **Test Plan** section
 - One issue per PR.
 - Update `README.md` in feature PRs so docs stay current.
+- **Code review workflow**: After opening as draft, the maintainer may mark the PR ready for review to trigger the Claude Code Review workflow. This is expected — PRs being non-draft at review time is intentional workflow, not a mistake.
 
 **Never push directly to main.**
 
