@@ -46,6 +46,8 @@ jobs:
 
             Review this PR. The branch is already checked out.
 
+            IMPORTANT: This review runs after a PR is marked ready for review. Per CLAUDE.md, PRs are correctly opened as drafts, then the maintainer marks them ready to trigger this review. The PR being non-draft at review time is expected workflow — do not flag this as an issue.
+
             1. Fetch PR data once: `gh pr view ${{ github.event.pull_request.number }} --json title,body,files,commits,additions,deletions,author,isDraft`
             2. Fetch the diff once: `gh pr diff ${{ github.event.pull_request.number }}`
             3. Read the root `CLAUDE.md`.

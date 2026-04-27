@@ -217,6 +217,7 @@ def test_parser_status_json_flag():
 def test_cmd_status_json_output(garlic_env, capsys):
     """--json emits the stable schema with correct types and values."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -224,7 +225,7 @@ def test_cmd_status_json_output(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 45.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = [30]\n'
@@ -243,12 +244,13 @@ def test_cmd_status_json_output(garlic_env, capsys):
     assert data["nudges_given"] == [30]
     assert data["next_threshold"] == 60
     assert data["ignored"] is False
-    assert data["date"] == "2026-04-25"
+    assert data["date"] == today
 
 
 def test_cmd_status_json_all_thresholds_crossed(garlic_env, capsys):
     """next_threshold is null when all thresholds are crossed."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -256,7 +258,7 @@ def test_cmd_status_json_all_thresholds_crossed(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 75.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = [30, 60]\n'
@@ -276,8 +278,9 @@ def test_cmd_status_json_all_thresholds_crossed(garlic_env, capsys):
 def test_cmd_status_json_ignored(garlic_env, capsys):
     """ignored field reflects state correctly."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 10.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -297,8 +300,9 @@ def test_cmd_status_json_ignored(garlic_env, capsys):
 def test_cmd_status_json_no_pretty_output(garlic_env, capsys):
     """--json produces only valid JSON, no human-readable lines."""
     _, _, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 0.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -557,6 +561,7 @@ def test_parser_statusline():
 def test_cmd_statusline_basic(garlic_env, capsys):
     """Outputs format: icon time / max_threshold."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -564,7 +569,7 @@ def test_cmd_statusline_basic(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 45.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -588,8 +593,9 @@ def test_cmd_statusline_vampire_icon(garlic_env, capsys):
         'nudge_thresholds_minutes = [60, 120]\n'
         'nudge_style = "gentle"\n'
     )
+    today = datetime.today().strftime("%Y-%m-%d")
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 51.0\n'  # 51/60 = 85%
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -607,6 +613,7 @@ def test_cmd_statusline_vampire_icon(garlic_env, capsys):
 def test_cmd_statusline_all_thresholds_crossed(garlic_env, capsys):
     """When all thresholds are crossed fraction is 1.0, so vampire icon shown."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -614,7 +621,7 @@ def test_cmd_statusline_all_thresholds_crossed(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 130.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = [60, 120]\n'
@@ -632,6 +639,7 @@ def test_cmd_statusline_all_thresholds_crossed(garlic_env, capsys):
 def test_cmd_statusline_ignored(garlic_env, capsys):
     """Appends (paused) when nudging is ignored."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -639,7 +647,7 @@ def test_cmd_statusline_ignored(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 30.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -657,6 +665,7 @@ def test_cmd_statusline_ignored(garlic_env, capsys):
 def test_cmd_statusline_no_thresholds(garlic_env, capsys):
     """With no thresholds configured, omits the / denominator."""
     _, config_path, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     config_path.write_text(
         'max_prompt_gap_minutes = 40\n'
         'reset_hour = 2\n'
@@ -664,7 +673,7 @@ def test_cmd_statusline_no_thresholds(garlic_env, capsys):
         'nudge_style = "gentle"\n'
     )
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 90.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
@@ -683,8 +692,9 @@ def test_cmd_statusline_no_thresholds(garlic_env, capsys):
 def test_cmd_statusline_single_line(garlic_env, capsys):
     """Output is always exactly one line."""
     _, _, state_path = garlic_env
+    today = datetime.today().strftime("%Y-%m-%d")
     state_path.write_text(
-        'date = "2026-04-25"\n'
+        f'date = "{today}"\n'
         'accumulated_minutes = 75.0\n'
         'last_event_time = 0.0\n'
         'nudges_given = []\n'
