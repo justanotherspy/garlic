@@ -137,3 +137,27 @@ def test_save_state_roundtrip(garlic_env):
     assert loaded["accumulated_minutes"] == 95.3
     assert loaded["nudges_given"] == [60]
     assert loaded["ignored"] is True
+
+
+def test_load_state_handles_corrupted_file(garlic_env):
+    """When state file has invalid TOML syntax, fall back to defaults."""
+    _, _, state_path = garlic_env
+    # Write invalid TOML (missing '=' as seen in the bug report)
+    state_path.write_text(
+        'date = "2026-03-16"\n'
+        "accumulated_minutes = 45.5\n"
+        "last_event_time = 1710567890.123\n"
+        "nudges_given = [60]\n"
+        "ignored = false\n"
+        "bad_line_no_equals\n"  # Invalid TOML at line 7
+        "bedtime_nudge_given = false\n"
+    )
+
+    with patch("garlic.state._current_date", return_value="2026-03-16"):
+        # Should not crash - should return fresh state
+        state = load_state(reset_hour=2)
+
+    assert state["date"] == "2026-03-16"
+    assert state["accumulated_minutes"] == 0.0
+    assert state["nudges_given"] == []
+    assert state["ignored"] is False
