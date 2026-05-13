@@ -59,7 +59,6 @@ def load_state(reset_hour: int) -> dict[str, Any]:
             state = tomllib.load(f)
         except tomllib.TOMLDecodeError:
             # State file is corrupted or uses old syntax - reset to defaults
-            fcntl.flock(f, fcntl.LOCK_UN)
             state = dict(DEFAULT_STATE)
             state["date"] = today
             return state
