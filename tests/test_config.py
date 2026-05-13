@@ -73,3 +73,24 @@ def test_write_toml_types(tmp_path):
     assert result["a_float"] == 3.14
     assert result["a_bool"] is True
     assert result["a_list"] == [1, 2, 3]
+
+
+def test_load_config_handles_corrupted_file(garlic_env):
+    """When config file has invalid TOML syntax, fall back to defaults and overwrite."""
+    _, config_path, _ = garlic_env
+    # Write invalid TOML (missing '=' as seen in the bug report)
+    config_path.write_text(
+        'nudge_style = "spicy"\n'
+        'max_prompt_gap_minutes = 60\n'
+        'bad_line_no_equals\n'  # Invalid TOML
+        'reset_hour = 4\n'
+    )
+
+    # Should not crash - should return defaults
+    config = load_config()
+
+    assert config == DEFAULTS
+    # File should be overwritten with valid defaults
+    with config_path.open("rb") as f:
+        on_disk = tomllib.load(f)
+    assert on_disk == DEFAULTS

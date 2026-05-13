@@ -40,6 +40,10 @@ def load_state(reset_hour: int) -> dict[str, Any]:
     """Load state from disk, resetting if the date has rolled over.
 
     Uses fcntl.flock for concurrent session safety.
+
+    If the state file is corrupted or has invalid TOML syntax,
+    reset to defaults and continue. This ensures hooks don't break
+    after upgrades that change the state format.
     """
     GARLIC_DIR.mkdir(parents=True, exist_ok=True)
     today = _current_date(reset_hour)
@@ -53,6 +57,12 @@ def load_state(reset_hour: int) -> dict[str, Any]:
         fcntl.flock(f, fcntl.LOCK_SH)
         try:
             state = tomllib.load(f)
+        except tomllib.TOMLDecodeError:
+            # State file is corrupted or uses old syntax - reset to defaults
+            fcntl.flock(f, fcntl.LOCK_UN)
+            state = dict(DEFAULT_STATE)
+            state["date"] = today
+            return state
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
 

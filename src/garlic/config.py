@@ -44,14 +44,25 @@ def save_config(config: dict[str, Any]) -> None:
 
 
 def load_config() -> dict[str, Any]:
-    """Load config from disk, creating it with defaults if missing."""
+    """Load config from disk, creating it with defaults if missing.
+
+    If the config file is corrupted or has invalid TOML syntax,
+    overwrite it with defaults and continue. This ensures hooks
+    don't break after upgrades that change the config format.
+    """
     if not CONFIG_PATH.exists():
         GARLIC_DIR.mkdir(parents=True, exist_ok=True)
         _write_toml(CONFIG_PATH, DEFAULTS)
         return dict(DEFAULTS)
 
-    with CONFIG_PATH.open("rb") as f:
-        user_config = tomllib.load(f)
+    try:
+        with CONFIG_PATH.open("rb") as f:
+            user_config = tomllib.load(f)
+    except tomllib.TOMLDecodeError:
+        # Config file is corrupted or uses old syntax - overwrite with defaults
+        GARLIC_DIR.mkdir(parents=True, exist_ok=True)
+        _write_toml(CONFIG_PATH, DEFAULTS)
+        return dict(DEFAULTS)
 
     # Merge defaults for any missing keys
     merged = dict(DEFAULTS)
