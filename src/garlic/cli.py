@@ -190,7 +190,6 @@ def cmd_setup(args: argparse.Namespace) -> None:
     mode = " (debug mode)" if args.debug else ""
     print(f"garlic: hooks installed in ~/.claude/settings.json{mode}")
     print("garlic: /garlic slash command installed in ~/.claude/commands/")
-    print("garlic: nudge-relay instruction installed in ~/.claude/CLAUDE.md")
     if args.defaults:
         print("garlic: config reset to built-in defaults")
 
