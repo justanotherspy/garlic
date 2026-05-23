@@ -1,10 +1,10 @@
 # Garlic 🧄 — the AI Vampire 🧛 Warding Tool
 
 [![CI](https://github.com/justanotherspy/garlic/workflows/CI/badge.svg)](https://github.com/justanotherspy/garlic/actions/workflows/ci.yml)
-[![Crates.io version](https://img.shields.io/crates/v/garlic-cli.svg)](https://crates.io/crates/garlic-cli)
+[![Crates.io version](https://img.shields.io/crates/v/garlic-ward.svg)](https://crates.io/crates/garlic-ward)
 [![MSRV](https://img.shields.io/badge/MSRV-1.89-blue.svg)](https://blog.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Crates.io downloads](https://img.shields.io/crates/d/garlic-cli.svg)](https://crates.io/crates/garlic-cli)
+[![Crates.io downloads](https://img.shields.io/crates/d/garlic-ward.svg)](https://crates.io/crates/garlic-ward)
 
 Garlic is used to ward off vampires. According to Steve Yegge, AI tools have a vampiric effect on us, draining us of energy and making us tired and exhausted. Not because they are not good at coding, or do not make us much more productive, but simply because we get dopamine for getting stuff done quicker, leading us to work longer and think harder. In short, we need to touch grass. Instead of going hard for 12 hours straight with our coding agent of choice and burning ourselves out to only create value for our employer, we should be mindful of the $/hr formula and consider a new balance. He estimates there are no more than 3-4 hours of good work that we can do in a day with all this uplift without burning our own candles a little too brightly. As someone quite sensitive to the effects of extended dopamine release on the mind and body, I tend to agree with him. So I created `garlic`, a CLI tool that helps you keep the draining to a minimum and maintain your own energy levels so we can continue to be healthy little worker bees for years to come.
 
@@ -35,16 +35,16 @@ If you're still coding in the hour before the daily reset (1 AM by default, when
 
 ## Setup
 
-Install garlic from [crates.io](https://crates.io/crates/garlic-cli) with [cargo](https://doc.rust-lang.org/cargo/):
+Install garlic from [crates.io](https://crates.io/crates/garlic-ward) with [cargo](https://doc.rust-lang.org/cargo/):
 
 ```bash
-cargo install garlic-cli
+cargo install garlic-ward
 ```
 
 Or, without a Rust toolchain, grab a prebuilt binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
 ```bash
-cargo binstall garlic-cli
+cargo binstall garlic-ward
 ```
 
 You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
@@ -76,7 +76,7 @@ Setup is idempotent — safe to run again if you need to repair or update hooks.
 ## Upgrading
 
 ```bash
-cargo install garlic-cli --force   # or: cargo binstall garlic-cli
+cargo install garlic-ward --force   # or: cargo binstall garlic-ward
 ```
 
 `garlic version` checks crates.io once a day and tells you when a newer release is available.
@@ -191,7 +191,7 @@ tracking that one event — while interactive commands report the error
 
 ## Project layout
 
-`garlic` is a Rust crate (`garlic-cli`) that builds a single binary named `garlic`. Source modules in `src/`:
+`garlic` is a Rust crate (`garlic-ward`) that builds a single binary named `garlic`. Source modules in `src/`:
 
 - `cli.rs` — CLI parsing (clap) and subcommand dispatch
 - `commands.rs` — implementations of `status`, `statusline`, `week`, `stats`, `set`, `reset`, `ignore`, `setup`, `version`
@@ -237,4 +237,4 @@ and documented in [`backend/README.md`](backend/README.md).
 - Merge the release PR
 - Release drafter updates the draft GitHub release
 - Publish the draft release
-- The release workflow then publishes `garlic-cli` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release
+- The release workflow then publishes `garlic-ward` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release

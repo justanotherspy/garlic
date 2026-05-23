@@ -7,8 +7,8 @@ use std::time::Duration;
 use serde::Deserialize;
 
 const VERSION_CACHE_TTL: f64 = 24.0 * 3600.0;
-pub const CRATES_API_URL: &str = "https://crates.io/api/v1/crates/garlic-cli";
-const USER_AGENT: &str = "garlic-cli (https://github.com/justanotherspy/garlic)";
+pub const CRATES_API_URL: &str = "https://crates.io/api/v1/crates/garlic-ward";
+const USER_AGENT: &str = "garlic-ward (https://github.com/justanotherspy/garlic)";
 
 #[derive(Deserialize, Default)]
 struct VersionCache {
@@ -28,7 +28,7 @@ pub fn parse_version(v: &str) -> Vec<u64> {
         .collect()
 }
 
-/// Fetch the latest `garlic-cli` version from crates.io. Returns it if newer
+/// Fetch the latest `garlic-ward` version from crates.io. Returns it if newer
 /// than `current`, else `None`.
 ///
 /// The result is cached in `cache_path` for 24 hours so repeated invocations of
@@ -117,7 +117,7 @@ mod tests {
         let server = MockServer::start();
         let body = format!("{{\"crate\":{{\"max_stable_version\":\"{version}\"}}}}");
         server.mock(|when, then| {
-            when.method(GET).path("/api/v1/crates/garlic-cli");
+            when.method(GET).path("/api/v1/crates/garlic-ward");
             then.status(200)
                 .header("content-type", "application/json")
                 .body(body);
@@ -147,7 +147,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("version_cache.toml");
         let server = mock_server("99.0.0");
-        let url = server.url("/api/v1/crates/garlic-cli");
+        let url = server.url("/api/v1/crates/garlic-ward");
         assert_eq!(
             check_latest_version("0.1.0", &cache, &url, NOW),
             Some("99.0.0".to_string())
@@ -159,7 +159,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("version_cache.toml");
         let server = mock_server("0.1.0");
-        let url = server.url("/api/v1/crates/garlic-cli");
+        let url = server.url("/api/v1/crates/garlic-ward");
         assert_eq!(check_latest_version("0.1.0", &cache, &url, NOW), None);
     }
 
@@ -168,7 +168,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("version_cache.toml");
         let server = mock_server("99.0.0");
-        let url = server.url("/api/v1/crates/garlic-cli");
+        let url = server.url("/api/v1/crates/garlic-ward");
         check_latest_version("0.1.0", &cache, &url, NOW);
         assert!(cache.exists());
         let data: VersionCache = toml::from_str(&fs::read_to_string(&cache).unwrap()).unwrap();
@@ -181,7 +181,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join("version_cache.toml");
         let server = mock_server("0.1.0");
-        let url = server.url("/api/v1/crates/garlic-cli");
+        let url = server.url("/api/v1/crates/garlic-ward");
         check_latest_version("0.1.0", &cache, &url, NOW);
         let data: VersionCache = toml::from_str(&fs::read_to_string(&cache).unwrap()).unwrap();
         assert_eq!(data.latest_version, "");
@@ -225,7 +225,7 @@ mod tests {
         )
         .unwrap();
         let server = mock_server("99.0.0");
-        let url = server.url("/api/v1/crates/garlic-cli");
+        let url = server.url("/api/v1/crates/garlic-ward");
         assert_eq!(
             check_latest_version("0.1.0", &cache, &url, NOW),
             Some("99.0.0".to_string())

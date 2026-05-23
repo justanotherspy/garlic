@@ -74,4 +74,4 @@ gh run view <run-id> --repo justanotherspy/garlic
 ## Releasing
 1. `make release BUMP=patch|minor|major` bumps `Cargo.toml` and opens a version-bump PR (needs `cargo install cargo-edit`).
 2. Merge it — release-drafter updates a draft GitHub release.
-3. Publish the draft → Actions publishes `garlic-cli` to crates.io (Trusted Publishing / OIDC) and uploads prebuilt Linux/macOS binaries to the release.
+3. Publish the draft → Actions publishes `garlic-ward` to crates.io (Trusted Publishing / OIDC) and uploads prebuilt Linux/macOS binaries to the release.
