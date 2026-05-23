@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use assert_cmd::Command;
 use garlic::paths::Paths;
 use garlic::state::{current_date, save_state, State};
+use httpmock::prelude::*;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
@@ -261,6 +262,104 @@ fn setup_installs_hooks_and_command() {
     assert!(settings.contains("garlic hook prompt"));
     assert!(settings.contains("garlic hook session-end"));
     assert!(claude_dir.join("commands").join("garlic.md").exists());
+}
+
+// --- Remote (shared-state backend) integration ---------------------------
+
+fn remote_state_body(minutes: f64, nudges: &str) -> String {
+    format!(
+        r#"{{"state":{{"date":"{date}","accumulated_minutes":{minutes},"last_event_time":0.0,"nudges_given":{nudges},"ignored":false,"bedtime_nudge_given":false,"history":[]}},"crossed_threshold":null,"bedtime":false}}"#,
+        date = current_date(2),
+    )
+}
+
+#[test]
+fn remote_status_reads_from_backend_not_local() {
+    let server = MockServer::start();
+    let m = server.mock(|when, then| {
+        when.method(GET)
+            .path("/v1/state")
+            .header("authorization", "Bearer tok");
+        then.status(200).body(remote_state_body(123.0, "[60]"));
+    });
+
+    // Seed a *different* local total to prove the remote value wins.
+    let tmp = seeded(State {
+        date: current_date(2),
+        accumulated_minutes: 45.0,
+        ..State::default()
+    });
+
+    garlic(&gdir(&tmp))
+        .env("GARLIC_URL", server.base_url())
+        .env("GARLIC_TOKEN", "tok")
+        .args(["status", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"accumulated_minutes\":123.0"));
+    m.assert();
+}
+
+#[test]
+fn remote_hook_prompt_nudges_from_backend() {
+    let server = MockServer::start();
+    let body = format!(
+        r#"{{"state":{{"date":"{date}","accumulated_minutes":60.0,"last_event_time":1.0,"nudges_given":[60],"ignored":false,"bedtime_nudge_given":false,"history":[]}},"crossed_threshold":60,"bedtime":false}}"#,
+        date = current_date(2),
+    );
+    let m = server.mock(|when, then| {
+        when.method(POST).path("/v1/events/prompt");
+        then.status(200).body(body);
+    });
+
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".garlic");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    garlic(&dir)
+        .env("GARLIC_URL", server.base_url())
+        .env("GARLIC_TOKEN", "tok")
+        .args(["hook", "prompt"])
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hookSpecificOutput"))
+        .stdout(predicate::str::contains("UserPromptSubmit"));
+    m.assert();
+}
+
+#[test]
+fn remote_status_errors_when_backend_unreachable() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".garlic");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Port 1 refuses connections immediately (no slow timeout).
+    garlic(&dir)
+        .env("GARLIC_URL", "http://127.0.0.1:1")
+        .env("GARLIC_TOKEN", "tok")
+        .arg("status")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("garlic:"));
+}
+
+#[test]
+fn remote_hook_prompt_is_silent_when_backend_unreachable() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".garlic");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // A failed backend call must never break a session: succeed silently.
+    garlic(&dir)
+        .env("GARLIC_URL", "http://127.0.0.1:1")
+        .env("GARLIC_TOKEN", "tok")
+        .args(["hook", "prompt"])
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
 }
 
 #[test]

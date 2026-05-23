@@ -8,6 +8,7 @@ pub mod format;
 pub mod hooks;
 pub mod nudges;
 pub mod paths;
+pub mod remote;
 pub mod setup;
 pub mod state;
 pub mod version;

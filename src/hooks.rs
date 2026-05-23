@@ -7,14 +7,66 @@ use std::io::{self, Write};
 
 use chrono::NaiveDateTime;
 
-use crate::config::load_config;
+use crate::config::{load_config, Config};
 use crate::engine::{
     check_bedtime, handle_prompt, handle_session_end, handle_session_start, handle_stop,
 };
 use crate::format::format_duration;
 use crate::nudges::{get_bedtime_nudge, get_nudge};
 use crate::paths::Paths;
+use crate::remote::Remote;
 use crate::state::{load_state, save_state};
+
+/// Build the nudge message (if any) for a prompt event from the inputs the
+/// local engine and the remote backend both produce: the highest threshold
+/// just crossed, whether we're in the bedtime window, and the ignore flag.
+fn nudge_for(
+    config: &Config,
+    accumulated_minutes: f64,
+    ignored: bool,
+    crossed: Option<i64>,
+    bedtime: bool,
+) -> Option<String> {
+    if ignored {
+        return None;
+    }
+    if let Some(t) = crossed {
+        let is_final = !config.nudge_thresholds_minutes.is_empty()
+            && t == *config.nudge_thresholds_minutes.iter().max().unwrap();
+        Some(get_nudge(
+            &config.nudge_style,
+            accumulated_minutes,
+            is_final,
+        ))
+    } else if bedtime {
+        Some(get_bedtime_nudge(accumulated_minutes))
+    } else {
+        None
+    }
+}
+
+/// Emit a nudge as the `UserPromptSubmit` JSON envelope Claude Code expects.
+fn write_nudge(out: &mut (impl Write + ?Sized), nudge: &str) -> io::Result<()> {
+    let response = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": nudge,
+        }
+    });
+    writeln!(out, "{}", serde_json::to_string(&response)?)
+}
+
+/// Print the session-start banner when there's accumulated time to report.
+fn write_session_banner(out: &mut (impl Write + ?Sized), accumulated: f64) -> io::Result<()> {
+    if accumulated > 0.0 {
+        writeln!(
+            out,
+            "\u{1f9c4} {} of active coding today",
+            format_duration(accumulated)
+        )?;
+    }
+    Ok(())
+}
 
 /// Handle SessionStart hook: record start timestamp and show status.
 pub fn hook_session_start(
@@ -30,15 +82,7 @@ pub fn hook_session_start(
     }
     handle_session_start(&mut state, now);
     save_state(paths, &state)?;
-
-    if state.accumulated_minutes > 0.0 {
-        writeln!(
-            out,
-            "\u{1f9c4} {} of active coding today",
-            format_duration(state.accumulated_minutes)
-        )?;
-    }
-    Ok(())
+    write_session_banner(out, state.accumulated_minutes)
 }
 
 /// Handle UserPromptSubmit hook: accumulate time, maybe nudge.
@@ -51,36 +95,24 @@ pub fn hook_prompt(
 ) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    let threshold = handle_prompt(&mut state, &config, now, debug);
+    let crossed = handle_prompt(&mut state, &config, now, debug);
 
-    let nudge = if let Some(t) = threshold {
-        if state.ignored {
-            None
-        } else {
-            let is_final = !config.nudge_thresholds_minutes.is_empty()
-                && t == *config.nudge_thresholds_minutes.iter().max().unwrap();
-            Some(get_nudge(
-                &config.nudge_style,
-                state.accumulated_minutes,
-                is_final,
-            ))
-        }
-    } else if !state.ignored && check_bedtime(&mut state, &config, now_local) {
-        Some(get_bedtime_nudge(state.accumulated_minutes))
-    } else {
-        None
-    };
+    // Only consider the bedtime window when no threshold fired and nudging
+    // isn't paused — check_bedtime sets a once-per-night flag as a side effect.
+    let bedtime =
+        crossed.is_none() && !state.ignored && check_bedtime(&mut state, &config, now_local);
+    let nudge = nudge_for(
+        &config,
+        state.accumulated_minutes,
+        state.ignored,
+        crossed,
+        bedtime,
+    );
 
     save_state(paths, &state)?;
 
     if let Some(nudge) = nudge {
-        let response = serde_json::json!({
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": nudge,
-            }
-        });
-        writeln!(out, "{}", serde_json::to_string(&response)?)?;
+        write_nudge(out, &nudge)?;
     }
     Ok(())
 }
@@ -99,6 +131,78 @@ pub fn hook_session_end(paths: &Paths, now: f64, debug: bool) -> io::Result<()> 
     let mut state = load_state(paths, config.reset_hour);
     handle_session_end(&mut state, &config, now, debug);
     save_state(paths, &state)
+}
+
+// --- Remote (shared-state backend) hook handlers ---------------------------
+//
+// When a backend is configured the server clock is authoritative, so these
+// don't pass `now`. A backend error must never break a session: each handler
+// degrades to a silent no-op (logging only under `--debug`).
+
+/// Log a backend failure to stderr in debug mode; never propagates.
+fn degrade(debug: bool, event: &str, err: &str) {
+    if debug {
+        eprintln!("[garlic debug] {event}: backend unavailable: {err}");
+    }
+}
+
+pub fn hook_session_start_remote(
+    remote: &Remote,
+    paths: &Paths,
+    debug: bool,
+    out: &mut (impl Write + ?Sized),
+) -> io::Result<()> {
+    let config = load_config(paths);
+    match remote.session_start(&config) {
+        Ok(resp) => write_session_banner(out, resp.state.accumulated_minutes),
+        Err(e) => {
+            degrade(debug, "session-start", &e);
+            Ok(())
+        }
+    }
+}
+
+pub fn hook_prompt_remote(
+    remote: &Remote,
+    paths: &Paths,
+    debug: bool,
+    out: &mut (impl Write + ?Sized),
+) -> io::Result<()> {
+    let config = load_config(paths);
+    match remote.prompt(&config) {
+        Ok(resp) => {
+            if let Some(nudge) = nudge_for(
+                &config,
+                resp.state.accumulated_minutes,
+                resp.state.ignored,
+                resp.crossed_threshold,
+                resp.bedtime,
+            ) {
+                write_nudge(out, &nudge)?;
+            }
+            Ok(())
+        }
+        Err(e) => {
+            degrade(debug, "prompt", &e);
+            Ok(())
+        }
+    }
+}
+
+pub fn hook_stop_remote(remote: &Remote, paths: &Paths, debug: bool) -> io::Result<()> {
+    let config = load_config(paths);
+    if let Err(e) = remote.stop(&config) {
+        degrade(debug, "stop", &e);
+    }
+    Ok(())
+}
+
+pub fn hook_session_end_remote(remote: &Remote, paths: &Paths, debug: bool) -> io::Result<()> {
+    let config = load_config(paths);
+    if let Err(e) = remote.session_end(&config) {
+        degrade(debug, "session-end", &e);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

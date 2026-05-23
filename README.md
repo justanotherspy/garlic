@@ -179,6 +179,16 @@ self-hostable (it just needs a Redis connection string) and ships with a
 Dockerfile and `docker-compose.yml`. See [`backend/README.md`](backend/README.md)
 for the deployment guide and the complete REST API contract.
 
+When both variables are set, garlic's hooks and the `status`, `statusline`,
+`week`, `stats`, `ignore`, and `reset` commands operate on the shared backend
+instead of `~/.garlic/state.toml`. The backend owns *state*; your local
+`~/.garlic/config.toml` still drives time accounting and the nudge wording, and
+is sent with each request. The server clock is authoritative, so clients in
+different timezones share one consistent "day". If the backend is unreachable,
+hooks fail open — they never block a Claude Code session, they just skip
+tracking that one event — while interactive commands report the error
+(`statusline` shows a muted `🧄 --`).
+
 ## Project layout
 
 `garlic` is a Rust crate (`garlic-cli`) that builds a single binary named `garlic`. Source modules in `src/`:
@@ -192,6 +202,7 @@ for the deployment guide and the complete REST API contract.
 - `hooks.rs` — handlers for the `session-start`, `prompt`, `stop`, and `session-end` hook subcommands
 - `setup.rs` — installs/updates hooks in `~/.claude/settings.json`
 - `version.rs` — daily crates.io update check
+- `remote.rs` — client for the optional shared-state backend (`$GARLIC_URL`/`$GARLIC_TOKEN`)
 - `paths.rs` — resolves `~/.garlic` (overridable via `$GARLIC_DIR`) and `~/.claude`
 
 Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, file-locked for concurrent sessions). Set `$GARLIC_DIR` to relocate it.
@@ -216,7 +227,7 @@ and documented in [`backend/README.md`](backend/README.md).
 
 **Minimal, audited dependencies.** Rust's standard library has no TOML parser, argument parser, or HTTP client, so garlic relies on a small set of widely-used crates (clap, serde, toml, chrono, rand, ureq, tempfile, dirs). They are pinned via the committed `Cargo.lock`, and CI runs `cargo audit` against the RustSec advisory database on every push. garlic runs on every prompt you send, so the supply chain is kept small and auditable on purpose.
 
-**No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere. The one exception is the opt-in daily update check, which fetches the latest version number from crates.io when you run `garlic version`.
+**No data leaves your machine by default.** All state lives in `~/.garlic/` and is never transmitted anywhere. There are two opt-in exceptions: the daily update check, which fetches the latest version number from crates.io when you run `garlic version`; and the shared-state backend, which (only when you set `$GARLIC_URL`/`$GARLIC_TOKEN`) sends your time-tracking events to the server you choose to self-host.
 
 **Built with Claude.** This project was built with Claude Code, which is fitting given what it does.
 

@@ -7,11 +7,16 @@ use chrono::Local;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::commands::{
-    cmd_ignore, cmd_reset, cmd_set, cmd_setup, cmd_stats, cmd_status, cmd_statusline, cmd_version,
-    cmd_week, Confirm,
+    cmd_ignore, cmd_ignore_remote, cmd_reset, cmd_reset_remote, cmd_set, cmd_setup, cmd_stats,
+    cmd_stats_remote, cmd_status, cmd_status_remote, cmd_statusline, cmd_statusline_remote,
+    cmd_version, cmd_week, cmd_week_remote, Confirm,
 };
-use crate::hooks::{hook_prompt, hook_session_end, hook_session_start, hook_stop};
+use crate::hooks::{
+    hook_prompt, hook_prompt_remote, hook_session_end, hook_session_end_remote, hook_session_start,
+    hook_session_start_remote, hook_stop, hook_stop_remote,
+};
 use crate::paths::{ClaudePaths, Paths};
+use crate::remote::Remote;
 
 #[derive(Parser)]
 #[command(
@@ -126,6 +131,10 @@ pub fn run() -> i32 {
         return 1;
     };
 
+    // Shared-state mode: when a backend is configured, state operations route
+    // through it instead of the local state file. Config always stays local.
+    let remote = Remote::from_env();
+
     match command {
         Command::Version => cmd_version(&paths, unix_now(), &mut out),
         Command::Setup {
@@ -144,28 +153,60 @@ pub fn run() -> i32 {
                 &mut out,
             )
         }
-        Command::Status { json } => cmd_status(&paths, json, &mut out),
-        Command::Statusline => cmd_statusline(&paths, &mut out),
-        Command::Week => cmd_week(&paths, Local::now().naive_local(), &mut out),
-        Command::Stats => cmd_stats(&paths, Local::now().naive_local(), &mut out),
-        Command::Ignore => cmd_ignore(&paths, &mut out),
+        Command::Status { json } => match &remote {
+            Some(r) => cmd_status_remote(r, &paths, json, &mut out, &mut err),
+            None => cmd_status(&paths, json, &mut out),
+        },
+        Command::Statusline => match &remote {
+            Some(r) => cmd_statusline_remote(r, &paths, &mut out),
+            None => cmd_statusline(&paths, &mut out),
+        },
+        Command::Week => match &remote {
+            Some(r) => cmd_week_remote(r, &paths, &mut out, &mut err),
+            None => cmd_week(&paths, Local::now().naive_local(), &mut out),
+        },
+        Command::Stats => match &remote {
+            Some(r) => cmd_stats_remote(r, &paths, &mut out, &mut err),
+            None => cmd_stats(&paths, Local::now().naive_local(), &mut out),
+        },
+        Command::Ignore => match &remote {
+            Some(r) => cmd_ignore_remote(r, &paths, &mut out, &mut err),
+            None => cmd_ignore(&paths, &mut out),
+        },
         Command::Set { assignment } => cmd_set(&paths, &assignment, &mut out, &mut err),
-        Command::Reset { yes } => cmd_reset(&paths, yes, &mut StdinConfirm, &mut out),
-        Command::Hook { hook_event, debug } => run_hook(&paths, hook_event, debug, &mut out),
+        Command::Reset { yes } => match &remote {
+            Some(r) => cmd_reset_remote(r, &paths, yes, &mut StdinConfirm, &mut out, &mut err),
+            None => cmd_reset(&paths, yes, &mut StdinConfirm, &mut out),
+        },
+        Command::Hook { hook_event, debug } => {
+            run_hook(&paths, remote.as_ref(), hook_event, debug, &mut out)
+        }
     }
 }
 
-fn run_hook(paths: &Paths, event: HookEvent, debug: bool, out: &mut dyn Write) -> i32 {
+fn run_hook(
+    paths: &Paths,
+    remote: Option<&Remote>,
+    event: HookEvent,
+    debug: bool,
+    out: &mut dyn Write,
+) -> i32 {
     // Consume the JSON Claude Code writes to stdin (the content is unused).
     let mut buf = String::new();
     let _ = io::stdin().read_to_string(&mut buf);
 
     let now = unix_now();
-    let result = match event {
-        HookEvent::SessionStart => hook_session_start(paths, now, debug, out),
-        HookEvent::Prompt => hook_prompt(paths, now, Local::now().naive_local(), debug, out),
-        HookEvent::Stop => hook_stop(paths, now, debug),
-        HookEvent::SessionEnd => hook_session_end(paths, now, debug),
+    let result = match (event, remote) {
+        (HookEvent::SessionStart, Some(r)) => hook_session_start_remote(r, paths, debug, out),
+        (HookEvent::SessionStart, None) => hook_session_start(paths, now, debug, out),
+        (HookEvent::Prompt, Some(r)) => hook_prompt_remote(r, paths, debug, out),
+        (HookEvent::Prompt, None) => {
+            hook_prompt(paths, now, Local::now().naive_local(), debug, out)
+        }
+        (HookEvent::Stop, Some(r)) => hook_stop_remote(r, paths, debug),
+        (HookEvent::Stop, None) => hook_stop(paths, now, debug),
+        (HookEvent::SessionEnd, Some(r)) => hook_session_end_remote(r, paths, debug),
+        (HookEvent::SessionEnd, None) => hook_session_end(paths, now, debug),
     };
     match result {
         Ok(()) => 0,
