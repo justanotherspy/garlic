@@ -161,6 +161,24 @@ nudge_thresholds_minutes = [30, 60, 90, 120, 150, 180, 210, 240]
 nudge_style = "gentle"
 ```
 
+## Shared state backend (self-hosted)
+
+By default garlic tracks time in a local `~/.garlic/state.toml`. If you run
+Claude Code across several machines or ephemeral cloud environments and want
+**one shared daily total**, you can self-host the garlic backend — a small Rust
+HTTP service backed by Redis — and point every client at it:
+
+```bash
+export GARLIC_URL="https://garlic.example.com"
+export GARLIC_TOKEN="<a token configured on your backend>"
+```
+
+Every agent using the same `GARLIC_TOKEN` shares one set of totals; local state
+remains the default when these variables are unset. The service is fully
+self-hostable (it just needs a Redis connection string) and ships with a
+Dockerfile and `docker-compose.yml`. See [`backend/README.md`](backend/README.md)
+for the deployment guide and the complete REST API contract.
+
 ## Project layout
 
 `garlic` is a Rust crate (`garlic-cli`) that builds a single binary named `garlic`. Source modules in `src/`:
@@ -186,6 +204,11 @@ Claude Code hooks written to `~/.claude/settings.json` by `garlic setup`:
 - **SessionEnd** → `garlic hook session-end` — finalizes in-flight generation time and clears `last_event_time` so a crashed or killed session can't leak time into the next one
 
 Each hook reads JSON from stdin and either writes plain text to stdout (a nudge) or exits silently.
+
+The optional self-hosted state backend lives in [`backend/`](backend/) — a Rust
+(axum + Redis) HTTP service that ports garlic's state engine server-side so
+totals can be shared across environments. It is independent of the CLI package
+and documented in [`backend/README.md`](backend/README.md).
 
 ## Things I should know?
 

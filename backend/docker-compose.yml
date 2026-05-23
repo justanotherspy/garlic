@@ -1,0 +1,62 @@
+# garlic-backend + Redis. Copy .env.example to .env and set GARLIC_AUTH_TOKENS
+# before bringing the stack up:
+#
+#   docker compose up -d --build
+#
+# For automatic HTTPS via Caddy (set GARLIC_DOMAIN in .env, point DNS at the
+# host, ensure ports 80/443 are reachable):
+#
+#   docker compose --profile tls up -d --build
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    volumes:
+      - garlic-redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: .
+    image: garlic-backend:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      GARLIC_REDIS_URL: "redis://redis:6379"
+      GARLIC_AUTH_TOKENS: "${GARLIC_AUTH_TOKENS:?set GARLIC_AUTH_TOKENS in .env}"
+      GARLIC_BIND: "0.0.0.0:8080"
+      # Defines the daily reset boundary for every client sharing this backend.
+      TZ: "${TZ:-UTC}"
+      RUST_LOG: "${RUST_LOG:-info}"
+    # Expose directly for plain-HTTP / local use. Remove this when fronting
+    # the backend with the `caddy` profile so only Caddy is internet-facing.
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    depends_on:
+      - backend
+    environment:
+      GARLIC_DOMAIN: "${GARLIC_DOMAIN:?set GARLIC_DOMAIN to enable the tls profile}"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+
+volumes:
+  garlic-redis-data:
+  caddy-data:
+  caddy-config:

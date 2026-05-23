@@ -1,0 +1,5 @@
+# Automatic HTTPS for the garlic backend. Caddy obtains and renews a
+# Let's Encrypt certificate for {$GARLIC_DOMAIN} and proxies to the backend.
+{$GARLIC_DOMAIN} {
+	reverse_proxy backend:8080
+}
