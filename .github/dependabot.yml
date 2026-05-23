@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "cargo"
-    directory: "/"
+    directories:
+      - "/"
+      - "/backend"
     schedule:
       interval: "weekly"
+    groups:
+      rust:
+        patterns:
+          - "*"
