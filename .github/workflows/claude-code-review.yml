@@ -54,14 +54,14 @@ jobs:
 
             Focus on, in priority order:
               (a) Genuine bugs in the diff (not pre-existing, not stylistic)
-              (b) Security issues introduced or supply chain has external runtime dependencies
-              (c) Tests in `tests/` use the `garlic_env` fixture when they touch state/config and cover any new code in 'src/' in the diff
+              (b) Security issues introduced, or new runtime dependencies added to `Cargo.toml` without clear justification (garlic keeps its dependency surface minimal and audited; `Cargo.lock` must be committed)
+              (c) Tests isolate filesystem I/O via a temp `GARLIC_DIR`/`CLAUDE_HOME` (never the real `~/.garlic` or `~/.claude`) and cover any new code in `src/` in the diff; `cargo fmt --check` and `cargo clippy -D warnings` stay clean
               (d) Conventional Commits compliance on all commit messages
               (e) PR title starts with the Linear issue ID (JUS-XX) and has a link to the ticket in the Body
               (f) README updated if user-facing behaviour changed
 
             Skip bug-hunting on changes that are obviously safe:
-              - Pure additions of config files (`.mcp.json`, `.github/**`, `pyproject.toml` non-runtime sections)
+              - Pure additions of config files (`.mcp.json`, `.github/**`, `Cargo.toml` non-dependency sections)
               - Pure documentation changes with no changes to code alongside it
               - Single-line value derivations, test-only additions
 

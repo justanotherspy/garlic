@@ -1,0 +1,46 @@
+[package]
+name = "garlic-cli"
+version = "0.2.3"
+edition = "2021"
+rust-version = "1.89"
+description = "Track active coding time with Claude Code and nudge yourself to take breaks"
+authors = ["Daniel Schwartz <danielschwar@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/justanotherspy/garlic"
+homepage = "https://github.com/justanotherspy/garlic"
+keywords = ["claude", "claude-code", "productivity", "cli", "hooks"]
+categories = ["command-line-utilities"]
+exclude = [".github/", ".claude/", ".mcp.json", ".semgrepignore", "Makefile"]
+
+[[bin]]
+name = "garlic"
+path = "src/main.rs"
+
+[lib]
+name = "garlic"
+path = "src/lib.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rand = "0.8"
+ureq = "2"
+tempfile = "3"
+dirs = "5"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+httpmock = "0.7"
+
+# Support `cargo binstall garlic-cli`, pointing at the GitHub Release assets
+# produced by the release workflow (taiki-e/upload-rust-binary-action), which
+# names archives `garlic-<target>.tar.gz` with the binary at the archive root.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/garlic-{ target }.{ archive-format }"
+pkg-fmt = "tgz"
+bin-dir = "garlic{ binary-ext }"
