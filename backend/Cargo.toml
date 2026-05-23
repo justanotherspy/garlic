@@ -1,0 +1,33 @@
+[package]
+name = "garlic-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Self-hostable HTTP state backend for the garlic CLI, backed by Redis"
+license = "MIT"
+publish = false
+
+[lib]
+name = "garlic_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "garlic-backend"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+hex = "0.4"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "test-util"] }
+tower = { version = "0.5", features = ["util"] }
