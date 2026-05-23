@@ -48,7 +48,21 @@ Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If o
 ## CI
 Pin all actions to full commit SHAs.
 
-**When a CI check fails**, always fetch the logs before drawing conclusions:
+**When a CI check fails**, always fetch the logs before drawing conclusions. Read the actual error output — don't guess the cause from the check name alone.
+
+**Prefer `shuck`** — it pulls the exact failing CI step logs for a PR and trims them down to the lines around each error, so you see the failure without scrolling through full logs:
+```bash
+shuck                      # inspect the open PR for the current branch
+shuck <pr>                 # inspect a PR (owner/repo inferred from the local repo)
+shuck justanotherspy/garlic <pr>   # inspect an explicit PR
+```
+Auth: it reads `GITHUB_TOKEN` / `GH_TOKEN` (or pass `--token`). Handy flags:
+- `-full` — show the full, untrimmed logs for failed steps (default trims to error context)
+- `-context <n>` — lines of context kept around each error match (default 10)
+- `-refresh` — ignore and rebuild the cache; `-no-cache` skips the cache, `-offline` renders only from cache
+- `-pattern <regexp>` — override the error-matching regexp
+
+Falling back to raw `gh`:
 ```bash
 # List failed runs for the PR
 gh run list --branch <branch> --status failure --repo justanotherspy/garlic
@@ -56,7 +70,6 @@ gh run list --branch <branch> --status failure --repo justanotherspy/garlic
 # View the summary and failed steps of a specific run
 gh run view <run-id> --repo justanotherspy/garlic
 ```
-Read the actual error output — don't guess the cause from the check name alone.
 
 ## Releasing
 1. `make release BUMP=patch|minor|major` bumps `Cargo.toml` and opens a version-bump PR (needs `cargo install cargo-edit`).
