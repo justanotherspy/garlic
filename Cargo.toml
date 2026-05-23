@@ -1,5 +1,5 @@
 [package]
-name = "garlic-cli"
+name = "garlic-ward"
 version = "0.3.0"
 edition = "2021"
 rust-version = "1.89"
@@ -37,7 +37,7 @@ assert_cmd = "2"
 predicates = "3"
 httpmock = "0.8"
 
-# Support `cargo binstall garlic-cli`, pointing at the GitHub Release assets
+# Support `cargo binstall garlic-ward`, pointing at the GitHub Release assets
 # produced by the release workflow (taiki-e/upload-rust-binary-action), which
 # names archives `garlic-<target>.tar.gz` with the binary at the archive root.
 [package.metadata.binstall]

@@ -535,7 +535,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "garlic-cli"
+name = "garlic-ward"
 version = "0.3.0"
 dependencies = [
  "assert_cmd",

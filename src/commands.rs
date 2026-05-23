@@ -75,7 +75,7 @@ pub fn cmd_version(paths: &Paths, now: f64, out: &mut dyn Write) -> i32 {
         let _ = writeln!(out, "  update available: {latest}");
         let _ = writeln!(
             out,
-            "  run: cargo install garlic-cli --force  (or: cargo binstall garlic-cli)"
+            "  run: cargo install garlic-ward --force  (or: cargo binstall garlic-ward)"
         );
     }
     0

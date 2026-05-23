@@ -85,10 +85,10 @@ jobs:
     needs: [verify, test]
     environment:
       name: crates-io
-      url: https://crates.io/crates/garlic-cli
+      url: https://crates.io/crates/garlic-ward
     permissions:
       # Trusted Publishing: mint a short-lived crates.io token via OIDC.
-      # Configure Trusted Publishing for `garlic-cli` on crates.io, OR remove
+      # Configure Trusted Publishing for `garlic-ward` on crates.io, OR remove
       # the auth-action step below and set a CARGO_REGISTRY_TOKEN secret.
       id-token: write
     steps:

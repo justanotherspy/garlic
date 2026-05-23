@@ -85,7 +85,7 @@ fn version_subcommand_shows_update_from_cache() {
         .assert()
         .success()
         .stdout(predicate::str::contains("update available: 99.0.0"))
-        .stdout(predicate::str::contains("cargo install garlic-cli"));
+        .stdout(predicate::str::contains("cargo install garlic-ward"));
 }
 
 #[test]
