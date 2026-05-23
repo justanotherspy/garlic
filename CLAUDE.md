@@ -57,6 +57,8 @@ gh run view <run-id> --repo justanotherspy/garlic
 ```
 Read the actual error output — don't guess the cause from the check name alone.
 
+For a faster look at what's failing, use the [`shuck` CLI](https://github.com/justanotherspy/shuck) — it surfaces CI errors quickly without manually paging through run logs.
+
 ## Releasing
 1. `make release BUMP=patch|minor|major` opens a version-bump + changelog PR.
 2. Merge it — release-drafter updates a draft GitHub release.
