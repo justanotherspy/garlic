@@ -11,7 +11,7 @@ repository = "https://github.com/justanotherspy/garlic"
 homepage = "https://github.com/justanotherspy/garlic"
 keywords = ["claude", "claude-code", "productivity", "cli", "hooks"]
 categories = ["command-line-utilities"]
-exclude = ["backend/", ".github/", ".claude/", ".mcp.json", ".semgrepignore", "Makefile"]
+exclude = ["backend/", "CLAUDE.md", ".github/", ".claude/", ".mcp.json", ".semgrepignore", "Makefile"]
 
 [[bin]]
 name = "garlic"
