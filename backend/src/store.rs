@@ -63,8 +63,13 @@ impl Store {
         F: FnOnce(&mut State) -> T,
     {
         let mut state = self.get_state(ns).await?;
+        let before = state.clone();
         let out = f(&mut state);
-        self.put_state(ns, &state).await?;
+        // Skip the write when nothing changed (e.g. a `GET /v1/state` whose
+        // rollover was a no-op), so reads don't churn Redis.
+        if state != before {
+            self.put_state(ns, &state).await?;
+        }
         Ok((state, out))
     }
 
@@ -217,5 +222,45 @@ impl MemoryStore {
             .lock()
             .unwrap()
             .insert(ns.to_string(), state.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn noop_mutate_does_not_persist() {
+        let store = Store::Memory(MemoryStore::new());
+        let (state, _) = store.mutate("ns", |_s| {}).await.unwrap();
+        assert_eq!(state, State::default());
+        let Store::Memory(m) = &store else {
+            unreachable!()
+        };
+        assert!(
+            m.data.lock().unwrap().is_empty(),
+            "an unchanged state should not be written"
+        );
+    }
+
+    #[tokio::test]
+    async fn changed_mutate_persists() {
+        let store = Store::Memory(MemoryStore::new());
+        store
+            .mutate("ns", |s| s.accumulated_minutes = 5.0)
+            .await
+            .unwrap();
+        let Store::Memory(m) = &store else {
+            unreachable!()
+        };
+        assert_eq!(
+            m.data
+                .lock()
+                .unwrap()
+                .get("ns")
+                .unwrap()
+                .accumulated_minutes,
+            5.0
+        );
     }
 }
