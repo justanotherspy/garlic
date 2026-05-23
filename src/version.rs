@@ -82,16 +82,16 @@ pub fn check_latest_version(
 
 /// GET the crates.io endpoint and extract the latest stable version.
 fn fetch_latest(base_url: &str) -> Option<String> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(3))
-        .build();
-    let body = agent
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .into();
+    let mut response = agent
         .get(base_url)
-        .set("User-Agent", USER_AGENT)
+        .header("User-Agent", USER_AGENT)
         .call()
-        .ok()?
-        .into_string()
         .ok()?;
+    let body = response.body_mut().read_to_string().ok()?;
     let data: serde_json::Value = serde_json::from_str(&body).ok()?;
     let krate = data.get("crate")?;
     krate

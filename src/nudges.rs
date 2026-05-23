@@ -1,6 +1,6 @@
 //! Hardcoded nudge message pools (gentle/firm/spicy) with random selection.
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 
 use crate::format::format_duration;
 
@@ -108,7 +108,7 @@ pub fn get_bedtime_nudge(accumulated_minutes: f64) -> String {
 
 fn render(pool: &[&str], accumulated_minutes: f64) -> String {
     let time_str = format_duration(accumulated_minutes);
-    let message = pool.choose(&mut rand::thread_rng()).copied().unwrap_or("");
+    let message = pool.choose(&mut rand::rng()).copied().unwrap_or("");
     message.replace("{time}", &time_str)
 }
 
