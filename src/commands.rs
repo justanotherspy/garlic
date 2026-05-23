@@ -6,13 +6,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike};
 
 use crate::config::{load_config, save_config, Config, CONFIG_KEYS, VALID_NUDGE_STYLES};
 use crate::format::format_duration;
 use crate::paths::{ClaudePaths, Paths};
+use crate::remote::Remote;
 use crate::setup::install_hooks;
-use crate::state::{load_state, load_state_for_date, save_state};
+use crate::state::{load_state, load_state_for_date, save_state, State};
 use crate::version::{check_latest_version, CRATES_API_URL};
 
 const GARLIC: &str = "\u{1f9c4}";
@@ -83,7 +84,12 @@ pub fn cmd_version(paths: &Paths, now: f64, out: &mut dyn Write) -> i32 {
 pub fn cmd_status(paths: &Paths, json: bool, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
     let state = load_state(paths, config.reset_hour);
+    status_core(&state, &config, json, out)
+}
 
+/// Render `status` from an already-loaded state and config (shared by the
+/// local and remote paths).
+fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) -> i32 {
     let minutes = state.accumulated_minutes;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
@@ -185,7 +191,10 @@ pub fn cmd_status(paths: &Paths, json: bool, out: &mut dyn Write) -> i32 {
 pub fn cmd_statusline(paths: &Paths, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
     let state = load_state(paths, config.reset_hour);
+    statusline_core(&state, &config, out)
+}
 
+fn statusline_core(state: &State, config: &Config, out: &mut dyn Write) -> i32 {
     let minutes = state.accumulated_minutes;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
@@ -220,7 +229,11 @@ pub fn cmd_week(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) ->
     let today = now.date();
     let today_str = today.format("%Y-%m-%d").to_string();
     let state = load_state_for_date(paths, &today_str);
+    week_core(&state, &config, today, out)
+}
 
+fn week_core(state: &State, config: &Config, today: NaiveDate, out: &mut dyn Write) -> i32 {
+    let today_str = today.format("%Y-%m-%d").to_string();
     let mut history_map: BTreeMap<String, f64> = BTreeMap::new();
     for entry in &state.history {
         history_map.insert(entry.date.clone(), entry.minutes);
@@ -281,7 +294,11 @@ pub fn cmd_stats(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) -
     let today = now.date();
     let today_str = today.format("%Y-%m-%d").to_string();
     let state = load_state_for_date(paths, &today_str);
+    stats_core(&state, today, out)
+}
 
+fn stats_core(state: &State, today: NaiveDate, out: &mut dyn Write) -> i32 {
+    let today_str = today.format("%Y-%m-%d").to_string();
     let mut history_map: BTreeMap<String, f64> = BTreeMap::new();
     for entry in &state.history {
         history_map.insert(entry.date.clone(), entry.minutes);
@@ -293,7 +310,7 @@ pub fn cmd_stats(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) -
     }
 
     // This calendar month.
-    let month_prefix = now.format("%Y-%m").to_string();
+    let month_prefix = today.format("%Y-%m").to_string();
     let month_entries: Vec<f64> = history_map
         .iter()
         .filter(|(d, _)| d.starts_with(&month_prefix))
@@ -368,7 +385,11 @@ pub fn cmd_stats(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) -
         }
     }
 
-    let month_label = format!("{} {}", MONTH_NAMES[(now.month() - 1) as usize], now.year());
+    let month_label = format!(
+        "{} {}",
+        MONTH_NAMES[(today.month() - 1) as usize],
+        today.year()
+    );
     let _ = writeln!(out, "{GARLIC} Stats — {month_label}\n");
     let _ = writeln!(
         out,
@@ -436,19 +457,22 @@ fn weekday_abbr(d: NaiveDate) -> &'static str {
 pub fn cmd_ignore(paths: &Paths, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    if state.ignored {
-        state.ignored = false;
-        let _ = save_state(paths, &state);
-        let _ = writeln!(out, "garlic: nudging resumed");
-    } else {
-        state.ignored = true;
-        let _ = save_state(paths, &state);
+    state.ignored = !state.ignored;
+    let _ = save_state(paths, &state);
+    write_ignore_state(out, state.ignored);
+    0
+}
+
+/// Report whether nudging is now paused or resumed.
+fn write_ignore_state(out: &mut dyn Write, ignored: bool) {
+    if ignored {
         let _ = writeln!(
             out,
             "garlic: nudging disabled for today (tracking continues)"
         );
+    } else {
+        let _ = writeln!(out, "garlic: nudging resumed");
     }
-    0
 }
 
 /// A validated config value parsed from a `KEY=VALUE` assignment.
@@ -506,10 +530,24 @@ pub fn parse_config_value(key: &str, raw: &str) -> Result<ParsedValue, String> {
             }
             Ok(ParsedValue::Thresholds(values))
         }
-        "max_prompt_gap_minutes" | "max_generation_minutes" | "reset_hour" => raw
-            .parse::<i64>()
-            .map(ParsedValue::Int)
-            .map_err(|_| format!("{key} must be an integer")),
+        "reset_hour" => {
+            let v = raw
+                .parse::<i64>()
+                .map_err(|_| format!("{key} must be an integer"))?;
+            if !(0..=23).contains(&v) {
+                return Err("reset_hour must be between 0 and 23".to_string());
+            }
+            Ok(ParsedValue::Int(v))
+        }
+        "max_prompt_gap_minutes" | "max_generation_minutes" => {
+            let v = raw
+                .parse::<i64>()
+                .map_err(|_| format!("{key} must be an integer"))?;
+            if v < 1 {
+                return Err(format!("{key} must be a positive integer"));
+            }
+            Ok(ParsedValue::Int(v))
+        }
         _ => Err(format!(
             "unknown config key: {key}. Valid keys: {}",
             CONFIG_KEYS.join(", ")
@@ -577,20 +615,39 @@ pub fn cmd_set(paths: &Paths, assignment: &str, out: &mut dyn Write, err: &mut d
     0
 }
 
-pub fn cmd_reset(paths: &Paths, yes: bool, confirm: &mut dyn Confirm, out: &mut dyn Write) -> i32 {
-    if !yes {
-        match confirm.ask("garlic: reset timer to zero for today? [y/N] ") {
-            None => {
-                let _ = writeln!(out);
-                return 1;
-            }
-            Some(answer) => {
-                if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-                    let _ = writeln!(out, "garlic: reset cancelled");
-                    return 0;
-                }
+/// Outcome of the reset confirmation prompt.
+enum ResetChoice {
+    Proceed,
+    Cancelled,
+    Eof,
+}
+
+/// Ask whether to reset (unless `yes`), printing the decision message.
+fn ask_reset(yes: bool, confirm: &mut dyn Confirm, out: &mut dyn Write) -> ResetChoice {
+    if yes {
+        return ResetChoice::Proceed;
+    }
+    match confirm.ask("garlic: reset timer to zero for today? [y/N] ") {
+        None => {
+            let _ = writeln!(out);
+            ResetChoice::Eof
+        }
+        Some(answer) => {
+            if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+                ResetChoice::Proceed
+            } else {
+                let _ = writeln!(out, "garlic: reset cancelled");
+                ResetChoice::Cancelled
             }
         }
+    }
+}
+
+pub fn cmd_reset(paths: &Paths, yes: bool, confirm: &mut dyn Confirm, out: &mut dyn Write) -> i32 {
+    match ask_reset(yes, confirm, out) {
+        ResetChoice::Proceed => {}
+        ResetChoice::Cancelled => return 0,
+        ResetChoice::Eof => return 1,
     }
 
     let config = load_config(paths);
@@ -787,6 +844,131 @@ pub fn cmd_setup(
     0
 }
 
+// --- Remote (shared-state backend) command handlers ------------------------
+//
+// When a backend is configured, state lives there; config stays local and is
+// sent with each request. Read commands surface a clear error on failure
+// rather than silently showing stale local numbers.
+
+/// Resolve "today" from a backend-reported state date, falling back to the
+/// local clock if the date is missing or unparseable.
+fn remote_today(date: &str, reset_hour: i64) -> NaiveDate {
+    NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .unwrap_or_else(|_| shift(Local::now().naive_local(), reset_hour).date())
+}
+
+pub fn cmd_status_remote(
+    remote: &Remote,
+    paths: &Paths,
+    json: bool,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config = load_config(paths);
+    match remote.get_state(config.reset_hour) {
+        Ok(resp) => status_core(&resp.state, &config, json, out),
+        Err(e) => {
+            let _ = writeln!(err, "garlic: {e}");
+            1
+        }
+    }
+}
+
+pub fn cmd_statusline_remote(remote: &Remote, paths: &Paths, out: &mut dyn Write) -> i32 {
+    let config = load_config(paths);
+    match remote.get_state(config.reset_hour) {
+        Ok(resp) => statusline_core(&resp.state, &config, out),
+        // The status bar always needs a line; show a muted offline marker.
+        Err(_) => {
+            let _ = writeln!(out, "{GARLIC} --");
+            0
+        }
+    }
+}
+
+pub fn cmd_week_remote(
+    remote: &Remote,
+    paths: &Paths,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config = load_config(paths);
+    match remote.get_state(config.reset_hour) {
+        Ok(resp) => {
+            let today = remote_today(&resp.state.date, config.reset_hour);
+            week_core(&resp.state, &config, today, out)
+        }
+        Err(e) => {
+            let _ = writeln!(err, "garlic: {e}");
+            1
+        }
+    }
+}
+
+pub fn cmd_stats_remote(
+    remote: &Remote,
+    paths: &Paths,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config = load_config(paths);
+    match remote.get_state(config.reset_hour) {
+        Ok(resp) => {
+            let today = remote_today(&resp.state.date, config.reset_hour);
+            stats_core(&resp.state, today, out)
+        }
+        Err(e) => {
+            let _ = writeln!(err, "garlic: {e}");
+            1
+        }
+    }
+}
+
+pub fn cmd_ignore_remote(
+    remote: &Remote,
+    paths: &Paths,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let config = load_config(paths);
+    match remote.ignore(&config, None) {
+        Ok(resp) => {
+            write_ignore_state(out, resp.state.ignored);
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(err, "garlic: {e}");
+            1
+        }
+    }
+}
+
+pub fn cmd_reset_remote(
+    remote: &Remote,
+    paths: &Paths,
+    yes: bool,
+    confirm: &mut dyn Confirm,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    match ask_reset(yes, confirm, out) {
+        ResetChoice::Proceed => {}
+        ResetChoice::Cancelled => return 0,
+        ResetChoice::Eof => return 1,
+    }
+    let config = load_config(paths);
+    match remote.reset(&config) {
+        Ok(_) => {
+            let _ = writeln!(out, "garlic: timer reset for today");
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(err, "garlic: {e}");
+            1
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -869,6 +1051,42 @@ mod tests {
         assert!(parse_config_value("reset_hour", "abc")
             .unwrap_err()
             .contains("must be an integer"));
+    }
+
+    #[test]
+    fn parse_reset_hour_out_of_range() {
+        for bad in ["24", "99", "-1"] {
+            assert!(
+                parse_config_value("reset_hour", bad)
+                    .unwrap_err()
+                    .contains("between 0 and 23"),
+                "expected range error for {bad}"
+            );
+        }
+        // Boundaries are accepted.
+        assert_eq!(
+            parse_config_value("reset_hour", "0").unwrap(),
+            ParsedValue::Int(0)
+        );
+        assert_eq!(
+            parse_config_value("reset_hour", "23").unwrap(),
+            ParsedValue::Int(23)
+        );
+    }
+
+    #[test]
+    fn parse_caps_must_be_positive() {
+        for key in ["max_prompt_gap_minutes", "max_generation_minutes"] {
+            for bad in ["0", "-5"] {
+                assert!(
+                    parse_config_value(key, bad)
+                        .unwrap_err()
+                        .contains("positive integer"),
+                    "expected positivity error for {key}={bad}"
+                );
+            }
+            assert_eq!(parse_config_value(key, "1").unwrap(), ParsedValue::Int(1));
+        }
     }
 
     #[test]
