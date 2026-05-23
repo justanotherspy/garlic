@@ -1,10 +1,10 @@
-"""Hardcoded nudge message pools (gentle/firm/spicy) with random selection."""
+//! Hardcoded nudge message pools (gentle/firm/spicy) with random selection.
 
-import random
+use rand::seq::SliceRandom;
 
-from garlic._format import format_duration
+use crate::format::format_duration;
 
-GENTLE = [
+pub const GENTLE: &[&str] = &[
     "You've been coding for {time}. A short break might feel nice.",
     "Heads up — {time} of active coding today. Stretch your legs?",
     "{time} in the flow. Remember to blink and hydrate.",
@@ -20,9 +20,9 @@ GENTLE = [
     "{time} today. Sometimes the best debugging happens away from the keyboard.",
     "{time} of coding — not bad. Refill that water bottle?",
     "You've been going for {time}. Even a one-minute stretch makes a difference.",
-]
+];
 
-FIRM = [
+pub const FIRM: &[&str] = &[
     "You've been coding for {time}. Time to step away for a bit.",
     "{time} of coding today. Take a real break — not just switching tabs.",
     "That's {time} of active work. Stand up, walk around, come back fresh.",
@@ -38,9 +38,9 @@ FIRM = [
     "{time} logged. The problems you're solving deserve a rested brain.",
     "{time}. You've earned a break. Take it before you start making tired mistakes.",
     "That's {time} of active coding. Close the editor. Stand up. Ten minutes minimum.",
-]
+];
 
-SPICY = [
+pub const SPICY: &[&str] = &[
     "{time} of coding. Touch grass. I'm not asking.",
     "You absolute gremlin — {time} straight. Go see the sun.",
     "{time}?! Your chair has a YOU-shaped dent. Get up.",
@@ -56,9 +56,9 @@ SPICY = [
     "{time}. The bugs will still be there when you get back. They always are.",
     "You've been at this for {time}. Your future chiropractor thanks you for the job security.",
     "{time} of letting an AI do your thinking. Go think your own thoughts for a bit.",
-]
+];
 
-FINAL = [
+pub const FINAL: &[&str] = &[
     "That's {time} today. Time's up — close the laptop and step away.",
     "You've hit {time}. That's your lot for today. Shut it down.",
     "{time}. Session over. The code will still be there tomorrow.",
@@ -69,9 +69,9 @@ FINAL = [
     "Hard stop: {time}. Walk away from the keyboard. You're done.",
     "{time} today. This is not a suggestion — wrap it up.",
     "Final nudge: {time}. The work will keep. You need to stop.",
-]
+];
 
-BEDTIME = [
+pub const BEDTIME: &[&str] = &[
     "It's getting late — {time} today and nearly reset time. Wrap up and get some sleep.",
     "{time} of coding and the clock's ticking toward bedtime. Save your work and call it a night.",
     "Late-night nudge: {time} today. Tomorrow-you will code better after real sleep.",
@@ -82,28 +82,83 @@ BEDTIME = [
     "{time} and counting at this hour? Your pillow misses you. Wrap it up.",
     "Almost reset time — {time} today. Push your branch and go to bed.",
     "{time} of coding into the wee hours. Nothing good happens in code after midnight.",
-]
+];
 
-POOLS = {
-    "gentle": GENTLE,
-    "firm": FIRM,
-    "spicy": SPICY,
+/// Return the message pool for a style, falling back to gentle.
+fn pool_for(style: &str) -> &'static [&'static str] {
+    match style {
+        "firm" => FIRM,
+        "spicy" => SPICY,
+        _ => GENTLE,
+    }
 }
 
+/// Pick a random nudge message from the given style pool.
+///
+/// If `is_final` is true, always uses the FINAL pool regardless of style.
+pub fn get_nudge(style: &str, accumulated_minutes: f64, is_final: bool) -> String {
+    let pool = if is_final { FINAL } else { pool_for(style) };
+    render(pool, accumulated_minutes)
+}
 
-def get_bedtime_nudge(accumulated_minutes: float) -> str:
-    """Pick a random bedtime nudge message."""
-    time_str = format_duration(accumulated_minutes)
-    message = random.choice(BEDTIME)
-    return message.format(time=time_str)
+/// Pick a random bedtime nudge message.
+pub fn get_bedtime_nudge(accumulated_minutes: f64) -> String {
+    render(BEDTIME, accumulated_minutes)
+}
 
+fn render(pool: &[&str], accumulated_minutes: f64) -> String {
+    let time_str = format_duration(accumulated_minutes);
+    let message = pool.choose(&mut rand::thread_rng()).copied().unwrap_or("");
+    message.replace("{time}", &time_str)
+}
 
-def get_nudge(style: str, accumulated_minutes: float, is_final: bool = False) -> str:
-    """Pick a random nudge message from the given style pool.
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    If is_final is True, always uses the FINAL pool regardless of style.
-    """
-    pool = FINAL if is_final else POOLS.get(style, GENTLE)
-    time_str = format_duration(accumulated_minutes)
-    message = random.choice(pool)
-    return message.format(time=time_str)
+    #[test]
+    fn nudge_contains_time() {
+        assert!(get_nudge("gentle", 120.0, false).contains("2h 00m"));
+    }
+
+    #[test]
+    fn nudge_all_styles() {
+        for style in ["gentle", "firm", "spicy"] {
+            let msg = get_nudge(style, 60.0, false);
+            assert!(msg.contains("1h 00m"));
+            assert!(msg.len() > 10);
+        }
+    }
+
+    #[test]
+    fn nudge_unknown_style_falls_back_to_gentle() {
+        let msg = get_nudge("unknown", 60.0, false);
+        assert!(msg.contains("1h 00m"));
+        assert!(GENTLE.iter().any(|m| m.replace("{time}", "1h 00m") == msg));
+    }
+
+    #[test]
+    fn nudge_is_final_uses_final_pool() {
+        for _ in 0..50 {
+            let msg = get_nudge("gentle", 240.0, true);
+            assert!(FINAL.iter().any(|m| m.replace("{time}", "4h 00m") == msg));
+        }
+    }
+
+    #[test]
+    fn bedtime_uses_bedtime_pool() {
+        for _ in 0..50 {
+            let msg = get_bedtime_nudge(45.0);
+            assert!(BEDTIME.iter().any(|m| m.replace("{time}", "45m") == msg));
+        }
+    }
+
+    #[test]
+    fn all_pool_messages_have_placeholder() {
+        for pool in [GENTLE, FIRM, SPICY, FINAL, BEDTIME] {
+            for msg in pool {
+                assert!(msg.contains("{time}"), "missing placeholder in: {msg}");
+            }
+        }
+    }
+}

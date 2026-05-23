@@ -3,16 +3,17 @@
 See @README.md for what garlic does, its config, and the project layout.
 
 ## Package management
-Use `uv` — never `pip`/`pip3`/`pipx`. `uv sync` to install, `uv run <cmd>` to run, `uv add [--dev] <pkg>` to add deps.
-Read @Makefile for make targets
+This is a Rust crate built with `cargo`. `cargo build` to compile, `cargo run -- <args>` to run, `cargo add [--dev] <crate>` to add deps, `cargo test` to test. Commit `Cargo.lock`.
+Read @Makefile for make targets.
 
 ## Philosophy
-**Standard library first.** Third-party runtime deps have a high bar — discuss before adding.
+**Standard library first.** New runtime dependencies have a high bar — discuss before adding. Rust's std lacks a TOML parser, arg parser, and HTTP client, so a small, audited set of crates is unavoidable; keep that set minimal. `cargo audit` runs in CI.
 
 ## Testing
-- Run: `uv run pytest`. Keep tests fast; no network calls.
-- **All tests must use the `garlic_env` fixture** from `tests/conftest.py`. It redirects `GARLIC_DIR`/`CONFIG_PATH`/`STATE_PATH` to a tmpdir so tests never touch `~/.garlic/`. Override file contents after requesting the fixture — never patch paths manually.
-- **Never run garlic commands against real paths** in tests or ad-hoc scripts. (A round-trip test once corrupted `~/.garlic/state.toml`.)
+- Run: `cargo test`. Keep tests fast; no external network calls (the version-check tests use a local mock server).
+- Before pushing, also run `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` — CI enforces both.
+- **Tests must never touch the real `~/.garlic/` or `~/.claude/`.** Unit tests build a `Paths`/`ClaudePaths` rooted at a `tempfile::TempDir`; integration tests set the `GARLIC_DIR` (and `CLAUDE_HOME`) env var to a temp directory. (A round-trip test once corrupted `~/.garlic/state.toml`.)
+- Engine and date logic take an injected clock (`now`) so they're deterministic — pass a fixed value rather than reading the wall clock.
 
 ## Commits
 Use **Conventional Commits** — `git-cliff` parses them to build the changelog. Format: `<type>(<scope>): <description>`. Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `perf`, `style`. Include the Linear ID when there is one: `feat(setup): add prompts (JUS-42)`.
@@ -58,6 +59,6 @@ gh run view <run-id> --repo justanotherspy/garlic
 Read the actual error output — don't guess the cause from the check name alone.
 
 ## Releasing
-1. `make release BUMP=patch|minor|major` opens a version-bump + changelog PR.
+1. `make release BUMP=patch|minor|major` bumps `Cargo.toml` and opens a version-bump PR (needs `cargo install cargo-edit`).
 2. Merge it — release-drafter updates a draft GitHub release.
-3. Publish the draft → Actions ships to PyPI via OIDC.
+3. Publish the draft → Actions publishes `garlic-cli` to crates.io (Trusted Publishing / OIDC) and uploads prebuilt Linux/macOS binaries to the release.

@@ -2,7 +2,7 @@
   "permissions": {
     "allow": [
       "Bash(git:*)",
-      "Bash(uv:*)",
+      "Bash(cargo:*)",
       "Bash(gh:*)",
       "mcp__linear__get_attachment",
       "mcp__linear__get_document",

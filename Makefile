@@ -1,29 +1,38 @@
-.PHONY: help build clean test release
+.PHONY: help build clean test fmt lint release
 
 # Default bump type (patch, minor, major)
 BUMP ?= patch
 
 help:
 	@echo "Available targets:"
-	@echo "  build       - Build sdist and wheel into dist/"
-	@echo "  clean       - Remove dist/"
+	@echo "  build       - Build the release binary into target/release/"
+	@echo "  clean       - Remove target/"
 	@echo "  test        - Run tests"
+	@echo "  fmt         - Format the code"
+	@echo "  lint        - Check formatting and run clippy (-D warnings)"
 	@echo "  release     - Create version bump PR (BUMP=patch|minor|major)"
 	@echo ""
 	@echo "Release workflow:"
-	@echo "  1. make release BUMP=patch  - Creates PR with version bump"
+	@echo "  1. make release BUMP=patch  - Creates PR with version bump (needs cargo-edit)"
 	@echo "  2. Merge PR                 - Release drafter updates draft release"
-	@echo "  3. Publish draft release    - GHA publishes to PyPI via OIDC"
+	@echo "  3. Publish draft release    - GHA ships to crates.io + uploads binaries"
 
 build:
-	uv build
+	cargo build --release
 
 clean:
-	rm -rf dist/
+	cargo clean
 
 test:
-	uv run pytest
+	cargo test
 
+fmt:
+	cargo fmt
+
+lint:
+	cargo fmt --check && cargo clippy --all-targets -- -D warnings
+
+# Requires cargo-edit for `cargo set-version`: cargo install cargo-edit
 release:
 	@echo "==> Checking for clean working tree" && \
 	git diff --quiet && git diff --cached --quiet || (echo "Error: Working tree not clean" && exit 1) && \
@@ -32,11 +41,11 @@ release:
 	echo "==> Creating release branch from origin/main" && \
 	git checkout -b release-prep-$$(date +%s) origin/main && \
 	echo "==> Running tests" && \
-	uv run pytest && \
+	cargo test && \
 	echo "==> Bumping $(BUMP) version" && \
-	uv version --bump $(BUMP) && \
-	NEW_VERSION=$$(grep '^version' pyproject.toml | head -1 | sed 's/.*"\(.*\)"/\1/') && \
-	git add pyproject.toml uv.lock && \
+	cargo set-version --bump $(BUMP) && \
+	NEW_VERSION=$$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/') && \
+	git add Cargo.toml Cargo.lock && \
 	git commit -m "chore(release): v$$NEW_VERSION" && \
 	echo "==> Pushing branch" && \
 	git push -u origin HEAD && \
@@ -49,4 +58,4 @@ release:
 	echo "==> Next steps:" && \
 	echo "    1. Review and merge the PR" && \
 	echo "    2. Release drafter will update the draft release" && \
-	echo "    3. Publish the draft release to trigger PyPI publish"
+	echo "    3. Publish the draft release to trigger crates.io publish + binary uploads"

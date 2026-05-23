@@ -1,10 +1,10 @@
 # Garlic 🧄 — the AI Vampire 🧛 Warding Tool
 
 [![CI](https://github.com/justanotherspy/garlic/workflows/CI/badge.svg)](https://github.com/justanotherspy/garlic/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/garlic-cli.svg)](https://pypi.org/project/garlic-cli/)
-[![Python versions](https://img.shields.io/pypi/pyversions/garlic-cli.svg)](https://pypi.org/project/garlic-cli/)
+[![Crates.io version](https://img.shields.io/crates/v/garlic-cli.svg)](https://crates.io/crates/garlic-cli)
+[![MSRV](https://img.shields.io/badge/MSRV-1.89-blue.svg)](https://blog.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Downloads](https://static.pepy.tech/badge/garlic-cli)](https://pepy.tech/project/garlic-cli)
+[![Crates.io downloads](https://img.shields.io/crates/d/garlic-cli.svg)](https://crates.io/crates/garlic-cli)
 
 Garlic is used to ward off vampires. According to Steve Yegge, AI tools have a vampiric effect on us, draining us of energy and making us tired and exhausted. Not because they are not good at coding, or do not make us much more productive, but simply because we get dopamine for getting stuff done quicker, leading us to work longer and think harder. In short, we need to touch grass. Instead of going hard for 12 hours straight with our coding agent of choice and burning ourselves out to only create value for our employer, we should be mindful of the $/hr formula and consider a new balance. He estimates there are no more than 3-4 hours of good work that we can do in a day with all this uplift without burning our own candles a little too brightly. As someone quite sensitive to the effects of extended dopamine release on the mind and body, I tend to agree with him. So I created `garlic`, a CLI tool that helps you keep the draining to a minimum and maintain your own energy levels so we can continue to be healthy little worker bees for years to come.
 
@@ -28,17 +28,26 @@ If you're still coding in the hour before the daily reset (1 AM by default, when
 
 ## Compatibility
 
-- Python 3.11+
 - macOS, Linux, and WSL
-- Not supported on native Windows (`fcntl` is unavailable)
+- Native Windows is not officially tested
+
+`garlic` is a single self-contained binary — no runtime (Python, Node, etc.) is required to run it.
 
 ## Setup
 
-Install garlic with [uv](https://docs.astral.sh/uv/):
+Install garlic from [crates.io](https://crates.io/crates/garlic-cli) with [cargo](https://doc.rust-lang.org/cargo/):
 
 ```bash
-uv tool install garlic-cli
+cargo install garlic-cli
 ```
+
+Or, without a Rust toolchain, grab a prebuilt binary with [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+```bash
+cargo binstall garlic-cli
+```
+
+You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
 
 Run setup to install the Claude Code hooks:
 
@@ -67,8 +76,10 @@ Setup is idempotent — safe to run again if you need to repair or update hooks.
 ## Upgrading
 
 ```bash
-uv tool install garlic-cli --upgrade
+cargo install garlic-cli --force   # or: cargo binstall garlic-cli
 ```
+
+`garlic version` checks crates.io once a day and tells you when a newer release is available.
 
 Then re-run `garlic setup` to update your hooks if the release notes mention hook changes.
 
@@ -152,17 +163,20 @@ nudge_style = "gentle"
 
 ## Project layout
 
-Source modules in `src/garlic/`:
+`garlic` is a Rust crate (`garlic-cli`) that builds a single binary named `garlic`. Source modules in `src/`:
 
-- `cli.py` — argparse entry point and subcommand dispatch
-- `config.py` — loads/creates `~/.garlic/config.toml` with defaults
-- `state.py` — reads/writes `~/.garlic/state.toml` under `fcntl.flock`, handles daily reset
-- `engine.py` — gap calculation, accumulation, threshold checking
-- `nudges.py` — hardcoded gentle/firm/spicy message pools
-- `hooks.py` — handlers for the `session-start`, `prompt`, and `stop` hook subcommands
-- `setup.py` — installs/updates hooks in `~/.claude/settings.json`
+- `cli.rs` — CLI parsing (clap) and subcommand dispatch
+- `commands.rs` — implementations of `status`, `statusline`, `week`, `stats`, `set`, `reset`, `ignore`, `setup`, `version`
+- `config.rs` — loads/creates `~/.garlic/config.toml` with defaults
+- `state.rs` — reads/writes `~/.garlic/state.toml` under an advisory file lock, handles daily reset
+- `engine.rs` — gap calculation, accumulation, threshold checking
+- `nudges.rs` — hardcoded gentle/firm/spicy message pools
+- `hooks.rs` — handlers for the `session-start`, `prompt`, `stop`, and `session-end` hook subcommands
+- `setup.rs` — installs/updates hooks in `~/.claude/settings.json`
+- `version.rs` — daily crates.io update check
+- `paths.rs` — resolves `~/.garlic` (overridable via `$GARLIC_DIR`) and `~/.claude`
 
-Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, `fcntl`-locked for concurrent sessions).
+Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, file-locked for concurrent sessions). Set `$GARLIC_DIR` to relocate it.
 
 Claude Code hooks written to `~/.claude/settings.json` by `garlic setup`:
 
@@ -175,19 +189,18 @@ Each hook reads JSON from stdin and either writes plain text to stdout (a nudge)
 
 ## Things I should know?
 
-**No prompt injection risk.** The nudge messages output by garlic's hooks are hardcoded in the project. There is no mechanism for external input to influence what gets sent to your agent. You can audit every possible message in [`src/garlic/nudges.py`](src/garlic/nudges.py).
+**No prompt injection risk.** The nudge messages output by garlic's hooks are hardcoded in the project. There is no mechanism for external input to influence what gets sent to your agent. You can audit every possible message in [`src/nudges.rs`](src/nudges.rs).
 
-**No runtime dependencies.** Garlic uses only the Python standard library at runtime. Development dependencies (pytest, build, twine) exist for testing and releasing, but are not shipped with the package. This is an intentional choice — garlic runs on every prompt you send, so the supply chain should be as small and auditable as possible.
+**Minimal, audited dependencies.** Rust's standard library has no TOML parser, argument parser, or HTTP client, so garlic relies on a small set of widely-used crates (clap, serde, toml, chrono, rand, ureq, tempfile, dirs). They are pinned via the committed `Cargo.lock`, and CI runs `cargo audit` against the RustSec advisory database on every push. garlic runs on every prompt you send, so the supply chain is kept small and auditable on purpose.
 
-**No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere.
+**No data leaves your machine.** All state lives in `~/.garlic/` and is never transmitted anywhere. The one exception is the opt-in daily update check, which fetches the latest version number from crates.io when you run `garlic version`.
 
 **Built with Claude.** This project was built with Claude Code, which is fitting given what it does.
 
 ## Release process
 
-- Run `make release BUMP=patch|minor|major`
-- Merge release PR
-- Draft release updates
-- Publish release 
-- Release workflow runs
-- Must approve deploy to pypi in run
+- Run `make release BUMP=patch|minor|major` (bumps `Cargo.toml`, opens a PR; needs `cargo install cargo-edit`)
+- Merge the release PR
+- Release drafter updates the draft GitHub release
+- Publish the draft release
+- The release workflow then publishes `garlic-cli` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release

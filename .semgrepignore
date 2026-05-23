@@ -1,11 +1,5 @@
-# Build and distribution artifacts
-dist/
-*.egg-info/
+# Build artifacts
+target/
 
-# Virtual environments
-.venv/
-venv/
-
-# Compiled bytecode
-__pycache__/
-*.pyc
+# Lockfile
+Cargo.lock
