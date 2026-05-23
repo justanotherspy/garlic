@@ -30,7 +30,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 rand = "0.8"
 ureq = "2"
 tempfile = "3"
-dirs = "5"
+dirs = "6"
 
 [dev-dependencies]
 assert_cmd = "2"
