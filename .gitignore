@@ -1,3 +1,8 @@
 /target/
 **/*.rs.bk
 *.pdb
+
+# Python artifacts (this is a Rust crate; these are stray tooling leftovers)
+__pycache__/
+*.py[cod]
+.venv/
