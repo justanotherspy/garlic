@@ -42,7 +42,11 @@ fn close_cursor(state: &mut State, config: &Config, session_id: &str, now: f64) 
         Kind::User => {
             let raw_gap = (now - cursor.start) / 60.0;
             if raw_gap > config.max_prompt_gap_minutes as f64 {
-                return; // stepped away — count nothing for this gap.
+                // Stepped away — count nothing for this gap, but still seed the
+                // migrated baseline so a pre-upgrade total isn't wiped by the
+                // following recompute when this is the first interval.
+                seed_baseline(state, cursor.start);
+                return;
             }
             now
         }
@@ -366,6 +370,21 @@ mod tests {
         handle_session_start(&mut s, "a", base);
         handle_prompt(&mut s, &cfg, "a", at(base, 2.0), false); // closes user [0,2]
         assert!((s.accumulated_minutes - 52.0).abs() < 0.01); // 50 migrated + 2
+        assert!(s.intervals.iter().any(|i| i.session_id == "migrated"));
+    }
+
+    #[test]
+    fn upgrade_baseline_survives_first_gap_over_cap() {
+        // Migrated state (accumulated > 0, no intervals) where the very first
+        // recorded gap exceeds the cap and is dropped. The drop must not wipe
+        // the migrated baseline.
+        let base = NOW;
+        let cfg = config(); // max_prompt_gap_minutes = 10
+        let mut s = state();
+        s.accumulated_minutes = 90.0; // migrated from old scalar model
+        handle_session_start(&mut s, "a", base); // opens user cursor
+        handle_prompt(&mut s, &cfg, "a", at(base, 30.0), false); // 30m gap > 10m cap → dropped
+        assert!((s.accumulated_minutes - 90.0).abs() < 0.01);
         assert!(s.intervals.iter().any(|i| i.session_id == "migrated"));
     }
 
