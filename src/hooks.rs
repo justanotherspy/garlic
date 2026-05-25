@@ -71,6 +71,7 @@ fn write_session_banner(out: &mut (impl Write + ?Sized), accumulated: f64) -> io
 /// Handle SessionStart hook: record start timestamp and show status.
 pub fn hook_session_start(
     paths: &Paths,
+    session_id: &str,
     now: f64,
     debug: bool,
     out: &mut (impl Write + ?Sized),
@@ -78,9 +79,9 @@ pub fn hook_session_start(
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
     if debug {
-        eprintln!("[garlic debug] session-start: recording timestamp");
+        eprintln!("[garlic debug] session-start ({session_id}): recording timestamp");
     }
-    handle_session_start(&mut state, now);
+    handle_session_start(&mut state, session_id, now);
     save_state(paths, &state)?;
     write_session_banner(out, state.accumulated_minutes)
 }
@@ -88,6 +89,7 @@ pub fn hook_session_start(
 /// Handle UserPromptSubmit hook: accumulate time, maybe nudge.
 pub fn hook_prompt(
     paths: &Paths,
+    session_id: &str,
     now: f64,
     now_local: NaiveDateTime,
     debug: bool,
@@ -95,7 +97,7 @@ pub fn hook_prompt(
 ) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    let crossed = handle_prompt(&mut state, &config, now, debug);
+    let crossed = handle_prompt(&mut state, &config, session_id, now, debug);
 
     // Only consider the bedtime window when no threshold fired and nudging
     // isn't paused — check_bedtime sets a once-per-night flag as a side effect.
@@ -117,19 +119,20 @@ pub fn hook_prompt(
     Ok(())
 }
 
-/// Handle Stop hook: accumulate generation time and update `last_event_time`.
-pub fn hook_stop(paths: &Paths, now: f64, debug: bool) -> io::Result<()> {
+/// Handle Stop hook: close the agent interval and open a user interval.
+pub fn hook_stop(paths: &Paths, session_id: &str, now: f64, debug: bool) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    handle_stop(&mut state, &config, now, debug);
+    handle_stop(&mut state, &config, session_id, now, debug);
     save_state(paths, &state)
 }
 
-/// Handle SessionEnd hook: finalize in-flight time and clear `last_event_time`.
-pub fn hook_session_end(paths: &Paths, now: f64, debug: bool) -> io::Result<()> {
+/// Handle SessionEnd hook: finalize the session's in-flight interval and drop
+/// its cursor.
+pub fn hook_session_end(paths: &Paths, session_id: &str, now: f64, debug: bool) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    handle_session_end(&mut state, &config, now, debug);
+    handle_session_end(&mut state, &config, session_id, now, debug);
     save_state(paths, &state)
 }
 
@@ -149,11 +152,12 @@ fn degrade(debug: bool, event: &str, err: &str) {
 pub fn hook_session_start_remote(
     remote: &Remote,
     paths: &Paths,
+    session_id: &str,
     debug: bool,
     out: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
     let config = load_config(paths);
-    match remote.session_start(&config) {
+    match remote.session_start(&config, session_id) {
         Ok(resp) => write_session_banner(out, resp.state.accumulated_minutes),
         Err(e) => {
             degrade(debug, "session-start", &e);
@@ -165,11 +169,12 @@ pub fn hook_session_start_remote(
 pub fn hook_prompt_remote(
     remote: &Remote,
     paths: &Paths,
+    session_id: &str,
     debug: bool,
     out: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
     let config = load_config(paths);
-    match remote.prompt(&config) {
+    match remote.prompt(&config, session_id) {
         Ok(resp) => {
             if let Some(nudge) = nudge_for(
                 &config,
@@ -189,17 +194,27 @@ pub fn hook_prompt_remote(
     }
 }
 
-pub fn hook_stop_remote(remote: &Remote, paths: &Paths, debug: bool) -> io::Result<()> {
+pub fn hook_stop_remote(
+    remote: &Remote,
+    paths: &Paths,
+    session_id: &str,
+    debug: bool,
+) -> io::Result<()> {
     let config = load_config(paths);
-    if let Err(e) = remote.stop(&config) {
+    if let Err(e) = remote.stop(&config, session_id) {
         degrade(debug, "stop", &e);
     }
     Ok(())
 }
 
-pub fn hook_session_end_remote(remote: &Remote, paths: &Paths, debug: bool) -> io::Result<()> {
+pub fn hook_session_end_remote(
+    remote: &Remote,
+    paths: &Paths,
+    session_id: &str,
+    debug: bool,
+) -> io::Result<()> {
     let config = load_config(paths);
-    if let Err(e) = remote.session_end(&config) {
+    if let Err(e) = remote.session_end(&config, session_id) {
         degrade(debug, "session-end", &e);
     }
     Ok(())
@@ -208,6 +223,7 @@ pub fn hook_session_end_remote(remote: &Remote, paths: &Paths, debug: bool) -> i
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intervals::{Kind, OpenCursor};
     use crate::state::{current_date, load_state, State};
     use chrono::NaiveDate;
     use tempfile::TempDir;
@@ -249,13 +265,28 @@ mod tests {
             .unwrap()
     }
 
+    /// A state with one open cursor for session `sid`.
+    fn with_cursor(accumulated: f64, sid: &str, kind: Kind, start: f64) -> State {
+        State {
+            accumulated_minutes: accumulated,
+            open: vec![OpenCursor {
+                session_id: sid.to_string(),
+                kind,
+                start,
+            }],
+            ..base_state()
+        }
+    }
+
     #[test]
-    fn session_start_records_timestamp() {
+    fn session_start_opens_user_cursor() {
         let (_tmp, paths) = setup(&base_state());
         let mut out = Vec::new();
-        hook_session_start(&paths, NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
         let state = load_state(&paths, 2);
-        assert_eq!(state.last_event_time, NOW);
+        assert_eq!(state.open.len(), 1);
+        assert_eq!(state.open[0].session_id, "s");
+        assert_eq!(state.open[0].kind, Kind::User);
     }
 
     #[test]
@@ -264,7 +295,7 @@ mod tests {
         s.accumulated_minutes = 95.0;
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_session_start(&paths, NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("1h 35m"));
     }
 
@@ -272,41 +303,41 @@ mod tests {
     fn session_start_silent_when_no_time() {
         let (_tmp, paths) = setup(&base_state());
         let mut out = Vec::new();
-        hook_session_start(&paths, NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
         assert!(out.is_empty());
     }
 
     #[test]
-    fn stop_accumulates_generation_time() {
-        let mut s = base_state();
-        s.accumulated_minutes = 30.0;
-        s.last_event_time = NOW - 120.0;
+    fn stop_closes_agent_interval() {
+        // 30m already tracked, an agent interval running for 2m.
+        let s = with_cursor(30.0, "x", Kind::Agent, NOW - 120.0);
         let (_tmp, paths) = setup(&s);
-        hook_stop(&paths, NOW, false).unwrap();
+        hook_stop(&paths, "x", NOW, false).unwrap();
         let state = load_state(&paths, 2);
-        assert_eq!(state.last_event_time, NOW);
         assert!((state.accumulated_minutes - 32.0).abs() < 0.01);
+        // A user-thinking cursor is now open for the same session.
+        assert!(state
+            .open
+            .iter()
+            .any(|c| c.session_id == "x" && c.kind == Kind::User));
     }
 
     #[test]
-    fn session_end_finalizes_and_clears() {
-        let mut s = base_state();
-        s.accumulated_minutes = 30.0;
-        s.last_event_time = NOW - 120.0;
+    fn session_end_finalizes_and_drops_cursor() {
+        let s = with_cursor(30.0, "x", Kind::Agent, NOW - 120.0);
         let (_tmp, paths) = setup(&s);
-        hook_session_end(&paths, NOW, false).unwrap();
+        hook_session_end(&paths, "x", NOW, false).unwrap();
         let state = load_state(&paths, 2);
         assert!((state.accumulated_minutes - 32.0).abs() < 0.01);
-        assert_eq!(state.last_event_time, 0.0);
+        assert!(state.open.iter().all(|c| c.session_id != "x"));
     }
 
     #[test]
     fn prompt_no_nudge_below_threshold() {
-        let mut s = base_state();
-        s.last_event_time = NOW - 300.0;
+        let s = with_cursor(0.0, "x", Kind::User, NOW - 300.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
         assert!(out.is_empty());
         let state = load_state(&paths, 2);
         assert!(state.accumulated_minutes > 0.0);
@@ -314,12 +345,11 @@ mod tests {
 
     #[test]
     fn prompt_with_nudge_crosses_threshold() {
-        let mut s = base_state();
-        s.accumulated_minutes = 58.0;
-        s.last_event_time = NOW - 300.0;
+        // 58m tracked + a 5m thinking gap → crosses the 60m threshold.
+        let s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         let response: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(
@@ -336,24 +366,20 @@ mod tests {
 
     #[test]
     fn prompt_ignored_no_nudge() {
-        let mut s = base_state();
-        s.accumulated_minutes = 58.0;
-        s.last_event_time = NOW - 300.0;
+        let mut s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
         s.ignored = true;
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
         assert!(out.is_empty());
     }
 
     #[test]
     fn prompt_bedtime_nudge() {
-        let mut s = base_state();
-        s.accumulated_minutes = 45.0;
-        s.last_event_time = NOW - 60.0;
+        let s = with_cursor(45.0, "x", Kind::User, NOW - 60.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, NOW, local(1, 30), false, &mut out).unwrap();
+        hook_prompt(&paths, "x", NOW, local(1, 30), false, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         let response: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(

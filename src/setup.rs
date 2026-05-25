@@ -9,7 +9,7 @@ use tempfile::NamedTempFile;
 
 use crate::paths::ClaudePaths;
 
-pub const GARLIC_COMMAND: &str = "---\ndescription: Show accumulated active coding time today\nargument-hint: \"[status|week|stats|ignore]\"\nallowed-tools: Bash(garlic:*)\n---\nRun `garlic $ARGUMENTS` (or `garlic status` if no arg) and show the output to me.\n";
+pub const GARLIC_COMMAND: &str = "---\ndescription: Show accumulated active coding time today\nargument-hint: \"[status|status --week|status --month|ignore]\"\nallowed-tools: Bash(garlic:*)\n---\nRun `garlic $ARGUMENTS` (or `garlic status` if no arg) and show the output to me.\n";
 
 /// (event, matcher, base command) for each hook garlic installs.
 const HOOK_DEFINITIONS: [(&str, &str, &str); 4] = [

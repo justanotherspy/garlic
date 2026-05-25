@@ -10,6 +10,7 @@ use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike};
 
 use crate::config::{load_config, save_config, Config, CONFIG_KEYS, VALID_NUDGE_STYLES};
 use crate::format::format_duration;
+use crate::intervals::breakdown;
 use crate::paths::{ClaudePaths, Paths};
 use crate::remote::Remote;
 use crate::setup::install_hooks;
@@ -21,6 +22,7 @@ const VAMPIRE: &str = "\u{1f9db}";
 const CROSS: &str = "\u{2716}";
 const ARROW: &str = "\u{2190}";
 const MIDDOT: &str = "\u{00b7}";
+const CONCURRENT: &str = "\u{21c4}";
 
 const MONTH_NAMES: [&str; 12] = [
     "January",
@@ -81,8 +83,24 @@ pub fn cmd_version(paths: &Paths, now: f64, out: &mut dyn Write) -> i32 {
     0
 }
 
-pub fn cmd_status(paths: &Paths, json: bool, out: &mut dyn Write) -> i32 {
+pub fn cmd_status(
+    paths: &Paths,
+    json: bool,
+    week: bool,
+    month: bool,
+    now_local: NaiveDateTime,
+    out: &mut dyn Write,
+) -> i32 {
     let config = load_config(paths);
+    if week || month {
+        let today = shift(now_local, config.reset_hour).date();
+        let state = load_state_for_date(paths, &today.format("%Y-%m-%d").to_string());
+        return if week {
+            week_core(&state, &config, today, out)
+        } else {
+            stats_core(&state, today, out)
+        };
+    }
     let state = load_state(paths, config.reset_hour);
     status_core(&state, &config, json, out)
 }
@@ -91,6 +109,7 @@ pub fn cmd_status(paths: &Paths, json: bool, out: &mut dyn Write) -> i32 {
 /// local and remote paths).
 fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) -> i32 {
     let minutes = state.accumulated_minutes;
+    let split = breakdown(&state.intervals);
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
     let nudges_given = &state.nudges_given;
@@ -103,6 +122,9 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
     if json {
         let obj = serde_json::json!({
             "accumulated_minutes": minutes,
+            "agent_minutes": split.agent,
+            "user_minutes": split.user,
+            "overlap_minutes": split.overlap,
             "thresholds": thresholds,
             "nudges_given": nudges_given,
             "next_threshold": next_threshold,
@@ -128,6 +150,23 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
         };
         let icon = if fraction < 0.85 { GARLIC } else { VAMPIRE };
         let _ = writeln!(out, "{icon} {time_str} of active coding today");
+    }
+
+    // Agent vs. user split, and concurrency as a neutral fact (never weighted).
+    if split.agent > 0.0 || split.user > 0.0 {
+        let _ = writeln!(
+            out,
+            "   agent {} {MIDDOT} user {}",
+            format_duration(split.agent),
+            format_duration(split.user),
+        );
+    }
+    if split.overlap > 0.0 {
+        let _ = writeln!(
+            out,
+            "   {} with 2+ sessions running at once",
+            format_duration(split.overlap),
+        );
     }
 
     if thresholds.is_empty() {
@@ -216,20 +255,15 @@ fn statusline_core(state: &State, config: &Config, out: &mut dyn Write) -> i32 {
     } else {
         format!("{icon} {time_str}")
     };
+    // Concurrency marker: 2+ sessions overlapped at some point today.
+    if breakdown(&state.intervals).overlap > 0.0 {
+        line.push_str(&format!(" {CONCURRENT}"));
+    }
     if state.ignored {
         line.push_str(" (paused)");
     }
     let _ = writeln!(out, "{line}");
     0
-}
-
-pub fn cmd_week(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) -> i32 {
-    let config = load_config(paths);
-    let now = shift(now_local, config.reset_hour);
-    let today = now.date();
-    let today_str = today.format("%Y-%m-%d").to_string();
-    let state = load_state_for_date(paths, &today_str);
-    week_core(&state, &config, today, out)
 }
 
 fn week_core(state: &State, config: &Config, today: NaiveDate, out: &mut dyn Write) -> i32 {
@@ -286,15 +320,6 @@ fn week_core(state: &State, config: &Config, today: NaiveDate, out: &mut dyn Wri
         format_duration(target as f64)
     );
     0
-}
-
-pub fn cmd_stats(paths: &Paths, now_local: NaiveDateTime, out: &mut dyn Write) -> i32 {
-    let config = load_config(paths);
-    let now = shift(now_local, config.reset_hour);
-    let today = now.date();
-    let today_str = today.format("%Y-%m-%d").to_string();
-    let state = load_state_for_date(paths, &today_str);
-    stats_core(&state, today, out)
 }
 
 fn stats_core(state: &State, today: NaiveDate, out: &mut dyn Write) -> i32 {
@@ -861,12 +886,25 @@ pub fn cmd_status_remote(
     remote: &Remote,
     paths: &Paths,
     json: bool,
+    week: bool,
+    month: bool,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
     let config = load_config(paths);
     match remote.get_state(config.reset_hour) {
-        Ok(resp) => status_core(&resp.state, &config, json, out),
+        Ok(resp) => {
+            if week || month {
+                let today = remote_today(&resp.state.date, config.reset_hour);
+                if week {
+                    week_core(&resp.state, &config, today, out)
+                } else {
+                    stats_core(&resp.state, today, out)
+                }
+            } else {
+                status_core(&resp.state, &config, json, out)
+            }
+        }
         Err(e) => {
             let _ = writeln!(err, "garlic: {e}");
             1
@@ -882,44 +920,6 @@ pub fn cmd_statusline_remote(remote: &Remote, paths: &Paths, out: &mut dyn Write
         Err(_) => {
             let _ = writeln!(out, "{GARLIC} --");
             0
-        }
-    }
-}
-
-pub fn cmd_week_remote(
-    remote: &Remote,
-    paths: &Paths,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    let config = load_config(paths);
-    match remote.get_state(config.reset_hour) {
-        Ok(resp) => {
-            let today = remote_today(&resp.state.date, config.reset_hour);
-            week_core(&resp.state, &config, today, out)
-        }
-        Err(e) => {
-            let _ = writeln!(err, "garlic: {e}");
-            1
-        }
-    }
-}
-
-pub fn cmd_stats_remote(
-    remote: &Remote,
-    paths: &Paths,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    let config = load_config(paths);
-    match remote.get_state(config.reset_hour) {
-        Ok(resp) => {
-            let today = remote_today(&resp.state.date, config.reset_hour);
-            stats_core(&resp.state, today, out)
-        }
-        Err(e) => {
-            let _ = writeln!(err, "garlic: {e}");
-            1
         }
     }
 }
@@ -1343,7 +1343,7 @@ mod tests {
             false,
         );
         let mut out = Vec::new();
-        cmd_status(&paths, true, &mut out);
+        cmd_status(&paths, true, false, false, dt(2026, 4, 14), &mut out);
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.lines().count(), 1);
         let data: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
@@ -1370,7 +1370,7 @@ mod tests {
             false,
         );
         let mut out = Vec::new();
-        cmd_status(&paths, true, &mut out);
+        cmd_status(&paths, true, false, false, dt(2026, 4, 14), &mut out);
         let data: serde_json::Value =
             serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
         assert_eq!(data["next_threshold"], serde_json::Value::Null);
@@ -1475,7 +1475,7 @@ mod tests {
         let (_t, paths) = env();
         write_state_with_history(&paths, "2026-04-14", 0.0, vec![]);
         let mut out = Vec::new();
-        cmd_stats(&paths, dt(2026, 4, 14), &mut out);
+        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("April 2026"));
         assert!(text.contains("This month:"));
@@ -1500,7 +1500,7 @@ mod tests {
             ],
         );
         let mut out = Vec::new();
-        cmd_stats(&paths, dt(2026, 4, 14), &mut out);
+        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("6h 00m")); // month total
         assert!(text.contains("4 active days"));
@@ -1520,7 +1520,7 @@ mod tests {
             vec![("2026-04-12", 60.0), ("2026-04-13", 60.0)],
         );
         let mut out = Vec::new();
-        cmd_stats(&paths, dt(2026, 4, 14), &mut out);
+        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
         assert!(String::from_utf8(out)
             .unwrap()
             .contains("Current streak:      2 days"));
@@ -1536,7 +1536,7 @@ mod tests {
             vec![("2026-03-05", 120.0), ("2026-04-04", 60.0)],
         );
         let mut out = Vec::new();
-        cmd_stats(&paths, dt(2026, 4, 14), &mut out);
+        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
         let text = String::from_utf8(out).unwrap();
         let rolling = text.lines().find(|l| l.contains("Rolling 30d")).unwrap();
         assert!(rolling.contains("1h 00m"));
@@ -1553,7 +1553,7 @@ mod tests {
         .unwrap();
         write_state_with_history(&paths, "2026-04-14", 60.0, vec![("2026-04-13", 120.0)]);
         let mut out = Vec::new();
-        cmd_week(&paths, dt(2026, 4, 14), &mut out);
+        cmd_status(&paths, false, true, false, dt(2026, 4, 14), &mut out);
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("Weekly usage (last 7 days)"));
         assert!(text.contains("today"));

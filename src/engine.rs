@@ -7,103 +7,145 @@
 use chrono::{NaiveDateTime, Timelike};
 
 use crate::config::Config;
+use crate::intervals::{breakdown, push_interval, Interval, Kind, OpenCursor};
 use crate::state::State;
 
-/// Process a prompt event: accumulate time and check thresholds.
+/// Remove and return the open cursor for `session_id`, if one exists.
+fn take_cursor(state: &mut State, session_id: &str) -> Option<OpenCursor> {
+    state
+        .open
+        .iter()
+        .position(|c| c.session_id == session_id)
+        .map(|pos| state.open.remove(pos))
+}
+
+/// Open a fresh cursor for `session_id`, replacing any existing one.
+fn open_cursor(state: &mut State, session_id: &str, kind: Kind, now: f64) {
+    state.open.retain(|c| c.session_id != session_id);
+    state.open.push(OpenCursor {
+        session_id: session_id.to_string(),
+        kind,
+        start: now,
+    });
+}
+
+/// Close `session_id`'s open cursor into a finished interval, applying the rule
+/// for the cursor's own kind: user gaps over `max_prompt_gap_minutes` are
+/// dropped entirely; agent generation is clamped to `max_generation_minutes`.
+/// Closing by stored kind (not by which event fired) keeps interleaved and
+/// missing-event sequences correct.
+fn close_cursor(state: &mut State, config: &Config, session_id: &str, now: f64) {
+    let Some(cursor) = take_cursor(state, session_id) else {
+        return;
+    };
+    let end = match cursor.kind {
+        Kind::User => {
+            let raw_gap = (now - cursor.start) / 60.0;
+            if raw_gap > config.max_prompt_gap_minutes as f64 {
+                return; // stepped away — count nothing for this gap.
+            }
+            now
+        }
+        Kind::Agent => {
+            let cap_secs = config.max_generation_minutes as f64 * 60.0;
+            cursor.start + (now - cursor.start).min(cap_secs)
+        }
+    };
+    seed_baseline(state, cursor.start);
+    push_interval(
+        &mut state.intervals,
+        Interval {
+            session_id: cursor.session_id,
+            kind: cursor.kind,
+            start: cursor.start,
+            end,
+        },
+    );
+}
+
+/// On the first interval recorded after an upgrade, preserve the day's existing
+/// `accumulated_minutes` (tracked by the old scalar model) as one synthetic
+/// agent interval ending at `anchor`, so the migrated total isn't lost.
+fn seed_baseline(state: &mut State, anchor: f64) {
+    if state.intervals.is_empty() && state.accumulated_minutes > 0.0 {
+        let start = anchor - state.accumulated_minutes * 60.0;
+        state.intervals.push(Interval {
+            session_id: "migrated".to_string(),
+            kind: Kind::Agent,
+            start,
+            end: anchor,
+        });
+    }
+}
+
+/// Recompute the persisted daily total as the union of all intervals.
+fn recompute_total(state: &mut State) {
+    state.accumulated_minutes = breakdown(&state.intervals).total;
+}
+
+/// Process a prompt event for `session_id`: close the user-thinking interval,
+/// start an agent interval, and check thresholds against the union total.
 ///
 /// Returns the threshold (in minutes) that was just crossed, or `None`.
-pub fn handle_prompt(state: &mut State, config: &Config, now: f64, debug: bool) -> Option<i64> {
-    let last = state.last_event_time;
-
-    if last > 0.0 {
-        let raw_gap = (now - last) / 60.0;
-        let cap = config.max_prompt_gap_minutes as f64;
-        let gap_minutes = if raw_gap <= cap { raw_gap } else { 0.0 };
-        state.accumulated_minutes += gap_minutes;
-
-        if debug {
-            let dropped = if raw_gap > cap {
-                format!(" → dropped (exceeded {cap}m cap)")
-            } else {
-                String::new()
-            };
-            eprintln!(
-                "[garlic debug] gap: {raw_gap:.2}m{dropped} | total: {:.2}m",
-                state.accumulated_minutes
-            );
-        }
-    } else if debug {
-        eprintln!("[garlic debug] no last_event_time, skipping gap");
+pub fn handle_prompt(
+    state: &mut State,
+    config: &Config,
+    session_id: &str,
+    now: f64,
+    debug: bool,
+) -> Option<i64> {
+    close_cursor(state, config, session_id, now);
+    open_cursor(state, session_id, Kind::Agent, now);
+    recompute_total(state);
+    if debug {
+        eprintln!(
+            "[garlic debug] prompt ({session_id}) | total: {:.2}m",
+            state.accumulated_minutes
+        );
     }
-
-    state.last_event_time = now;
-
     check_thresholds(state, config)
 }
 
-/// Process a stop event: accumulate generation time and update
-/// `last_event_time`. Generation time is clamped to `max_generation_minutes`.
-pub fn handle_stop(state: &mut State, config: &Config, now: f64, debug: bool) {
-    let last = state.last_event_time;
-
-    if last > 0.0 {
-        let raw_gap = (now - last) / 60.0;
-        let cap = config.max_generation_minutes as f64;
-        let gap_minutes = raw_gap.min(cap);
-        state.accumulated_minutes += gap_minutes;
-
-        if debug {
-            let clamped = if raw_gap > cap {
-                format!(" → clamped to {cap:.0}m cap")
-            } else {
-                String::new()
-            };
-            eprintln!(
-                "[garlic debug] stop gap: {raw_gap:.2}m{clamped} | total: {:.2}m",
-                state.accumulated_minutes
-            );
-        }
+/// Process a stop event for `session_id`: close the agent interval (clamped to
+/// `max_generation_minutes`) and start a user-thinking interval.
+pub fn handle_stop(state: &mut State, config: &Config, session_id: &str, now: f64, debug: bool) {
+    close_cursor(state, config, session_id, now);
+    open_cursor(state, session_id, Kind::User, now);
+    recompute_total(state);
+    if debug {
+        eprintln!(
+            "[garlic debug] stop ({session_id}) | total: {:.2}m",
+            state.accumulated_minutes
+        );
     }
-
-    state.last_event_time = now;
 }
 
-/// Process a session-start event: record timestamp.
-pub fn handle_session_start(state: &mut State, now: f64) {
-    state.last_event_time = now;
+/// Process a session-start event for `session_id`: open a user-thinking cursor
+/// so the time before the first prompt counts as engagement (as before).
+pub fn handle_session_start(state: &mut State, session_id: &str, now: f64) {
+    open_cursor(state, session_id, Kind::User, now);
 }
 
-/// Process a session-end event: finalize in-flight time and clear
-/// `last_event_time`.
-///
-/// If the session was killed mid-generation (SIGTERM, crash, network loss),
-/// Stop never fires. Without this, `last_event_time` would stay set and the
-/// next session's first prompt would compute a huge gap. This accumulates the
-/// outstanding gap (clamped to `max_generation_minutes`) and zeroes
-/// `last_event_time`.
-pub fn handle_session_end(state: &mut State, config: &Config, now: f64, debug: bool) {
-    let last = state.last_event_time;
-
-    if last > 0.0 {
-        let raw_gap = (now - last) / 60.0;
-        let cap = config.max_generation_minutes as f64;
-        let gap_minutes = raw_gap.min(cap);
-        state.accumulated_minutes += gap_minutes;
-
-        if debug {
-            let clamped = if raw_gap > cap {
-                format!(" → clamped to {cap:.0}m cap")
-            } else {
-                String::new()
-            };
-            eprintln!(
-                "[garlic debug] session-end gap: {raw_gap:.2}m{clamped} | total: {:.2}m",
-                state.accumulated_minutes
-            );
-        }
+/// Process a session-end event for `session_id`: finalize the in-flight
+/// interval (clamped) and drop the session's cursor, so a killed session can't
+/// leak time into the next one. Per-session, so other live sessions are
+/// untouched.
+pub fn handle_session_end(
+    state: &mut State,
+    config: &Config,
+    session_id: &str,
+    now: f64,
+    debug: bool,
+) {
+    close_cursor(state, config, session_id, now);
+    state.open.retain(|c| c.session_id != session_id);
+    recompute_total(state);
+    if debug {
+        eprintln!(
+            "[garlic debug] session-end ({session_id}) | total: {:.2}m",
+            state.accumulated_minutes
+        );
     }
-
-    state.last_event_time = 0.0;
 }
 
 /// Return the highest newly-crossed threshold, or `None`.
@@ -171,231 +213,160 @@ mod tests {
     }
 
     #[test]
-    fn prompt_accumulates_time() {
+    fn prompt_then_stop_splits_user_and_agent() {
+        let base = NOW;
+        let cfg = config();
         let mut s = state();
-        s.last_event_time = NOW - 300.0;
-        handle_prompt(&mut s, &config(), NOW, false);
+
+        handle_session_start(&mut s, "a", at(base, 0.0));
+        handle_prompt(&mut s, &cfg, "a", at(base, 3.0), false); // 3m user thinking
+        handle_stop(&mut s, &cfg, "a", at(base, 5.0), false); // 2m agent generation
+
+        let b = breakdown(&s.intervals);
+        assert!((b.user - 3.0).abs() < 0.01);
+        assert!((b.agent - 2.0).abs() < 0.01);
         assert!((s.accumulated_minutes - 5.0).abs() < 0.01);
-        assert_eq!(s.last_event_time, NOW);
+        assert_eq!(b.overlap, 0.0);
     }
 
     #[test]
-    fn prompt_drops_large_gap() {
+    fn prompt_drops_large_user_gap() {
+        let base = NOW;
         let mut s = state();
-        s.last_event_time = NOW - 1800.0;
-        handle_prompt(&mut s, &config(), NOW, false);
+        handle_session_start(&mut s, "a", base);
+        handle_prompt(&mut s, &config(), "a", at(base, 30.0), false); // gap 30 > cap 10
         assert_eq!(s.accumulated_minutes, 0.0);
     }
 
     #[test]
-    fn prompt_first_event_no_accumulation() {
+    fn first_prompt_without_start_only_opens_agent() {
         let mut s = state();
-        handle_prompt(&mut s, &config(), NOW, false);
+        handle_prompt(&mut s, &config(), "a", NOW, false);
         assert_eq!(s.accumulated_minutes, 0.0);
-        assert_eq!(s.last_event_time, NOW);
+        assert!(s.intervals.is_empty());
+        assert_eq!(s.open.len(), 1);
+        assert_eq!(s.open[0].kind, Kind::Agent);
     }
 
     #[test]
-    fn prompt_crosses_threshold() {
+    fn stop_clamps_generation_at_cap() {
+        let base = NOW;
+        let cfg = config();
+        let mut s = state();
+        handle_session_start(&mut s, "a", base);
+        handle_prompt(&mut s, &cfg, "a", at(base, 1.0), false); // open agent
+        handle_stop(&mut s, &cfg, "a", at(base, 1.0 + 6.0 * 60.0), false); // 6h → clamp 120
+        let b = breakdown(&s.intervals);
+        assert!((b.agent - 120.0).abs() < 0.01);
+        assert!((b.user - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn threshold_crosses_on_union_total() {
         let mut s = state();
         s.accumulated_minutes = 58.0;
-        s.last_event_time = NOW - 300.0;
-        let result = handle_prompt(&mut s, &config(), NOW, false);
-        assert_eq!(result, Some(60));
+        assert_eq!(check_thresholds(&mut s, &config()), None); // not yet
+        s.accumulated_minutes = 61.0;
+        assert_eq!(check_thresholds(&mut s, &config()), Some(60));
         assert!(s.nudges_given.contains(&60));
     }
 
     #[test]
-    fn prompt_no_duplicate_nudge() {
+    fn threshold_not_refired_after_crossing() {
         let mut s = state();
-        s.accumulated_minutes = 58.0;
-        s.last_event_time = NOW - 300.0;
-        s.nudges_given = vec![60];
-        let result = handle_prompt(&mut s, &config(), NOW, false);
-        assert_eq!(result, None);
+        s.accumulated_minutes = 61.0;
+        assert_eq!(check_thresholds(&mut s, &config()), Some(60));
+        assert_eq!(check_thresholds(&mut s, &config()), None);
+        assert_eq!(s.nudges_given.iter().filter(|&&t| t == 60).count(), 1);
     }
 
     #[test]
-    fn prompt_crosses_multiple_returns_highest() {
+    fn threshold_crosses_multiple_returns_highest() {
         let mut s = state();
-        s.accumulated_minutes = 115.0;
-        s.last_event_time = NOW - 600.0;
-        let result = handle_prompt(&mut s, &config(), NOW, false);
-        assert_eq!(result, Some(120));
+        s.accumulated_minutes = 121.0;
+        assert_eq!(check_thresholds(&mut s, &config()), Some(120));
         assert!(s.nudges_given.contains(&120));
     }
 
     #[test]
-    fn stop_accumulates_generation_time() {
-        let mut s = state();
-        s.accumulated_minutes = 30.0;
-        s.last_event_time = NOW - 180.0;
-        handle_stop(&mut s, &config(), NOW, false);
-        assert_eq!(s.last_event_time, NOW);
-        assert!((s.accumulated_minutes - 33.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn stop_clamps_at_generation_cap() {
-        let mut s = state();
-        s.last_event_time = NOW - 6.0 * 3600.0;
-        handle_stop(&mut s, &config(), NOW, false);
-        assert!((s.accumulated_minutes - 120.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn stop_counts_normal_generation_in_full() {
-        let mut s = state();
-        s.last_event_time = NOW - 3600.0;
-        handle_stop(&mut s, &config(), NOW, false);
-        assert!((s.accumulated_minutes - 60.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn stop_no_accumulation_without_last_event() {
-        let mut s = state();
-        handle_stop(&mut s, &config(), NOW, false);
-        assert_eq!(s.last_event_time, NOW);
-        assert_eq!(s.accumulated_minutes, 0.0);
-    }
-
-    #[test]
-    fn session_end_accumulates_and_clears() {
-        let mut s = state();
-        s.accumulated_minutes = 30.0;
-        s.last_event_time = NOW - 180.0;
-        handle_session_end(&mut s, &config(), NOW, false);
-        assert!((s.accumulated_minutes - 33.0).abs() < 0.01);
-        assert_eq!(s.last_event_time, 0.0);
-    }
-
-    #[test]
-    fn session_end_clamps_at_generation_cap() {
-        let mut s = state();
-        s.last_event_time = NOW - 6.0 * 3600.0;
-        handle_session_end(&mut s, &config(), NOW, false);
-        assert!((s.accumulated_minutes - 120.0).abs() < 0.01);
-        assert_eq!(s.last_event_time, 0.0);
-    }
-
-    #[test]
-    fn session_end_no_last_event_still_clears() {
-        let mut s = state();
-        s.accumulated_minutes = 5.0;
-        handle_session_end(&mut s, &config(), NOW, false);
-        assert_eq!(s.accumulated_minutes, 5.0);
-        assert_eq!(s.last_event_time, 0.0);
-    }
-
-    #[test]
-    fn session_killed_before_stop_does_not_double_count() {
-        let base = NOW;
-        let cfg = Config {
-            max_prompt_gap_minutes: 40,
-            ..config()
-        };
-        let mut s = state();
-        s.last_event_time = base;
-
-        handle_session_end(&mut s, &cfg, at(base, 5.0), false);
-        assert!((s.accumulated_minutes - 5.0).abs() < 0.01);
-        assert_eq!(s.last_event_time, 0.0);
-
-        handle_session_start(&mut s, at(base, 120.0));
-        handle_prompt(&mut s, &cfg, at(base, 123.0), false);
-
-        assert!((s.accumulated_minutes - 8.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn session_start_records_timestamp() {
-        let mut s = state();
-        handle_session_start(&mut s, NOW);
-        assert_eq!(s.last_event_time, NOW);
-    }
-
-    #[test]
-    fn sequence_prompt_stop_prompt() {
+    fn session_end_finalizes_agent_and_clears_cursor() {
         let base = NOW;
         let cfg = config();
         let mut s = state();
-
-        handle_session_start(&mut s, at(base, 0.0));
-        handle_prompt(&mut s, &cfg, at(base, 3.0), false);
-        assert!((s.accumulated_minutes - 3.0).abs() < 0.01);
-
-        handle_stop(&mut s, &cfg, at(base, 5.0), false);
-        assert!((s.accumulated_minutes - 5.0).abs() < 0.01);
-        assert!((s.last_event_time - at(base, 5.0)).abs() < 0.01);
-
-        handle_prompt(&mut s, &cfg, at(base, 7.0), false);
-        assert!((s.accumulated_minutes - 7.0).abs() < 0.01);
+        handle_session_start(&mut s, "a", base);
+        handle_prompt(&mut s, &cfg, "a", at(base, 1.0), false); // open agent
+        handle_session_end(&mut s, &cfg, "a", at(base, 4.0), false); // 3m agent
+        assert!(s.open.iter().all(|c| c.session_id != "a"));
+        let b = breakdown(&s.intervals);
+        assert!((b.agent - 3.0).abs() < 0.01);
     }
 
     #[test]
-    fn sequence_multiple_prompts_accumulate() {
+    fn session_end_per_session_leaves_others_running() {
         let base = NOW;
         let cfg = config();
         let mut s = state();
-        s.last_event_time = base;
+        handle_session_start(&mut s, "a", base);
+        handle_session_start(&mut s, "b", base);
+        handle_prompt(&mut s, &cfg, "a", at(base, 1.0), false);
+        handle_prompt(&mut s, &cfg, "b", at(base, 1.0), false);
+        handle_session_end(&mut s, &cfg, "a", at(base, 2.0), false);
+        // b's agent cursor survives.
+        assert!(s.open.iter().any(|c| c.session_id == "b"));
+        assert!(s.open.iter().all(|c| c.session_id != "a"));
+    }
 
-        let gaps = [2.0, 4.0, 3.0, 5.0];
+    #[test]
+    fn parallel_sessions_union_and_overlap() {
+        let base = NOW;
+        let cfg = config();
+        let mut s = state();
+        handle_session_start(&mut s, "a", base);
+        handle_session_start(&mut s, "b", base);
+        handle_prompt(&mut s, &cfg, "a", at(base, 1.0), false); // user a [0,1]
+        handle_prompt(&mut s, &cfg, "b", at(base, 1.0), false); // user b [0,1]
+        handle_stop(&mut s, &cfg, "a", at(base, 5.0), false); // agent a [1,5]
+        handle_stop(&mut s, &cfg, "b", at(base, 6.0), false); // agent b [1,6]
+        let b = breakdown(&s.intervals);
+        assert!((b.total - 6.0).abs() < 0.01); // union [0,6]
+        assert!((b.agent - 5.0).abs() < 0.01); // union [1,6]
+        assert!((b.user - 1.0).abs() < 0.01); // union [0,1]
+                                              // overlap: users [0,1]=1 + agents [1,5]=4 → 5
+        assert!((b.overlap - 5.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn single_session_matches_legacy_sum() {
+        // A linear session's union total equals the old simple sum.
+        let base = NOW;
+        let cfg = config();
+        let mut s = state();
+        handle_session_start(&mut s, "a", base);
         let mut t = base;
-        for gap in gaps {
+        for (gap, is_prompt) in [(2.0, true), (4.0, false), (3.0, true), (5.0, false)] {
             t += gap * 60.0;
-            handle_prompt(&mut s, &cfg, t, false);
-        }
-        assert!((s.accumulated_minutes - 14.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn sequence_gap_exceeding_cap_then_normal() {
-        let base = NOW;
-        let cfg = config();
-        let mut s = state();
-        s.last_event_time = base;
-
-        handle_prompt(&mut s, &cfg, at(base, 30.0), false);
-        assert_eq!(s.accumulated_minutes, 0.0);
-
-        handle_prompt(&mut s, &cfg, at(base, 34.0), false);
-        assert!((s.accumulated_minutes - 4.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn all_thresholds_fire_in_order() {
-        let base = NOW;
-        let cfg = Config {
-            max_prompt_gap_minutes: 70,
-            ..config()
-        };
-        let mut s = state();
-        s.last_event_time = base;
-
-        let mut fired = Vec::new();
-        for i in 1..=4 {
-            if let Some(t) = handle_prompt(&mut s, &cfg, at(base, (i * 65) as f64), false) {
-                fired.push(t);
+            if is_prompt {
+                handle_prompt(&mut s, &cfg, "a", t, false);
+            } else {
+                handle_stop(&mut s, &cfg, "a", t, false);
             }
         }
-        assert_eq!(fired, vec![60, 120, 180, 240]);
-        assert_eq!(s.nudges_given, vec![60, 120, 180, 240]);
+        assert!((s.accumulated_minutes - 14.0).abs() < 0.01);
+        assert_eq!(breakdown(&s.intervals).overlap, 0.0);
     }
 
     #[test]
-    fn threshold_not_refired_after_crossing() {
+    fn upgrade_baseline_preserves_existing_total() {
         let base = NOW;
-        let cfg = Config {
-            nudge_thresholds_minutes: vec![60],
-            ..config()
-        };
+        let cfg = config();
         let mut s = state();
-        s.accumulated_minutes = 59.0;
-        s.last_event_time = base;
-
-        assert_eq!(handle_prompt(&mut s, &cfg, at(base, 2.0), false), Some(60));
-        assert_eq!(handle_prompt(&mut s, &cfg, at(base, 4.0), false), None);
-        assert_eq!(s.nudges_given.iter().filter(|&&t| t == 60).count(), 1);
+        s.accumulated_minutes = 50.0; // migrated from old scalar model
+                                      // A session that started before the upgrade has no cursor; first prompt
+                                      // opens an agent cursor, first stop records the first interval + seeds.
+        handle_session_start(&mut s, "a", base);
+        handle_prompt(&mut s, &cfg, "a", at(base, 2.0), false); // closes user [0,2]
+        assert!((s.accumulated_minutes - 52.0).abs() < 0.01); // 50 migrated + 2
+        assert!(s.intervals.iter().any(|i| i.session_id == "migrated"));
     }
 
     fn dt(h: u32, min: u32) -> NaiveDateTime {

@@ -76,6 +76,14 @@ impl Remote {
         })
     }
 
+    /// Event body: config plus the `session_id` the backend attributes the
+    /// interval to.
+    fn event_body(config: &Config, session_id: &str) -> serde_json::Value {
+        let mut body = Self::config_body(config);
+        body["session_id"] = serde_json::json!(session_id);
+        body
+    }
+
     fn auth(&self) -> String {
         format!("Bearer {}", self.token)
     }
@@ -95,20 +103,30 @@ impl Remote {
         parse_body(&url, &text)
     }
 
-    pub fn session_start(&self, config: &Config) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/session-start", Self::config_body(config))
+    pub fn session_start(
+        &self,
+        config: &Config,
+        session_id: &str,
+    ) -> Result<RemoteResponse, String> {
+        self.post(
+            "/v1/events/session-start",
+            Self::event_body(config, session_id),
+        )
     }
 
-    pub fn prompt(&self, config: &Config) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/prompt", Self::config_body(config))
+    pub fn prompt(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
+        self.post("/v1/events/prompt", Self::event_body(config, session_id))
     }
 
-    pub fn stop(&self, config: &Config) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/stop", Self::config_body(config))
+    pub fn stop(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
+        self.post("/v1/events/stop", Self::event_body(config, session_id))
     }
 
-    pub fn session_end(&self, config: &Config) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/session-end", Self::config_body(config))
+    pub fn session_end(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
+        self.post(
+            "/v1/events/session-end",
+            Self::event_body(config, session_id),
+        )
     }
 
     pub fn reset(&self, config: &Config) -> Result<RemoteResponse, String> {
@@ -182,13 +200,14 @@ mod tests {
             when.method(POST)
                 .path("/v1/events/prompt")
                 .header("authorization", "Bearer secret")
+                .json_body_includes(r#"{"session_id":"sess-1"}"#)
                 .json_body_includes(r#"{"nudge_thresholds_minutes":[30,60,90,120,150,180,210,240]}"#);
             then.status(200).body(
                 r#"{"state":{"date":"2026-05-23","accumulated_minutes":61.0,"last_event_time":1.0,"nudges_given":[60],"ignored":false,"bedtime_nudge_given":false,"history":[]},"crossed_threshold":60,"bedtime":false}"#,
             );
         });
         let remote = Remote::new(&server.base_url(), "secret").unwrap();
-        let resp = remote.prompt(&config()).unwrap();
+        let resp = remote.prompt(&config(), "sess-1").unwrap();
         m.assert();
         assert_eq!(resp.crossed_threshold, Some(60));
         assert!(!resp.bedtime);
@@ -217,7 +236,7 @@ mod tests {
             then.status(401).body(r#"{"error":"invalid token"}"#);
         });
         let remote = Remote::new(&server.base_url(), "tok").unwrap();
-        let err = remote.stop(&config()).unwrap_err();
+        let err = remote.stop(&config(), "sess-1").unwrap_err();
         assert!(err.contains("/v1/events/stop"), "got: {err}");
     }
 

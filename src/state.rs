@@ -6,6 +6,7 @@ use std::io::{self, Write};
 use chrono::{Local, NaiveDateTime, Timelike};
 use serde::{Deserialize, Serialize};
 
+use crate::intervals::{Interval, OpenCursor};
 use crate::paths::Paths;
 
 pub const HISTORY_MAX: usize = 30;
@@ -32,6 +33,12 @@ pub struct State {
     pub bedtime_nudge_given: bool,
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Closed intervals tracked today (agent/user spans, tagged by session).
+    #[serde(default)]
+    pub intervals: Vec<Interval>,
+    /// In-flight cursors, one per session with an interval still open.
+    #[serde(default)]
+    pub open: Vec<OpenCursor>,
 }
 
 impl State {
@@ -42,64 +49,11 @@ impl State {
         }
     }
 
-    /// Serialize to the flat TOML layout garlic has always written. Floats keep
-    /// a decimal point so the values round-trip as TOML floats (a bare `180`
-    /// would parse back as an integer and fail to deserialize into `f64`).
+    /// Serialize to TOML. The `toml` crate emits whole-number `f64`s with a
+    /// trailing `.0`, so the float fields round-trip without the hand-rolled
+    /// formatting garlic used before nested interval tables existed.
     pub fn to_toml(&self) -> String {
-        let nudges = self
-            .nudges_given
-            .iter()
-            .map(|v| v.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
-        let history = if self.history.is_empty() {
-            "[]".to_string()
-        } else {
-            let entries = self
-                .history
-                .iter()
-                .map(|e| {
-                    format!(
-                        "{{date = \"{}\", minutes = {}}}",
-                        e.date,
-                        fmt_float(e.minutes)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{entries}]")
-        };
-        format!(
-            "date = \"{}\"\n\
-             accumulated_minutes = {}\n\
-             last_event_time = {}\n\
-             nudges_given = [{}]\n\
-             ignored = {}\n\
-             bedtime_nudge_given = {}\n\
-             history = {}\n",
-            self.date,
-            fmt_float(self.accumulated_minutes),
-            fmt_float(self.last_event_time),
-            nudges,
-            self.ignored,
-            self.bedtime_nudge_given,
-            history,
-        )
-    }
-}
-
-/// Format an `f64` so it always reads back as a TOML float.
-fn fmt_float(v: f64) -> String {
-    let s = format!("{v}");
-    if s.contains('.')
-        || s.contains('e')
-        || s.contains('E')
-        || s.contains("inf")
-        || s.contains("NaN")
-    {
-        s
-    } else {
-        format!("{s}.0")
+        toml::to_string(self).unwrap_or_default()
     }
 }
 
@@ -196,6 +150,7 @@ pub fn save_state(paths: &Paths, state: &State) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intervals::Kind;
     use chrono::NaiveDate;
     use tempfile::TempDir;
 
@@ -352,10 +307,66 @@ mod tests {
                 date: "2026-03-15".to_string(),
                 minutes: 120.0,
             }],
+            intervals: vec![
+                Interval {
+                    session_id: "s1".to_string(),
+                    kind: Kind::User,
+                    start: 1710567000.0,
+                    end: 1710567180.0,
+                },
+                Interval {
+                    session_id: "s1".to_string(),
+                    kind: Kind::Agent,
+                    start: 1710567180.0,
+                    end: 1710567890.0,
+                },
+            ],
+            open: vec![OpenCursor {
+                session_id: "s1".to_string(),
+                kind: Kind::User,
+                start: 1710567890.123,
+            }],
         };
         save_state(&paths, &state).unwrap();
         let loaded = load_state_for_date(&paths, "2026-03-16");
         assert_eq!(loaded, state);
+    }
+
+    #[test]
+    fn to_toml_keeps_whole_floats() {
+        // Whole-number floats must round-trip as floats, not integers.
+        let state = State {
+            date: "2026-03-16".to_string(),
+            accumulated_minutes: 180.0,
+            history: vec![HistoryEntry {
+                date: "2026-03-15".to_string(),
+                minutes: 120.0,
+            }],
+            ..State::default()
+        };
+        let parsed: State = toml::from_str(&state.to_toml()).unwrap();
+        assert_eq!(parsed, state);
+    }
+
+    #[test]
+    fn loads_legacy_state_without_intervals() {
+        // Pre-upgrade state.toml has no intervals/open fields.
+        let (_tmp, paths) = paths();
+        std::fs::write(
+            paths.state(),
+            "date = \"2026-03-16\"\n\
+             accumulated_minutes = 45.5\n\
+             last_event_time = 1710567890.123\n\
+             nudges_given = [30]\n\
+             ignored = false\n\
+             bedtime_nudge_given = false\n\
+             history = []\n",
+        )
+        .unwrap();
+        let state = load_state_for_date(&paths, "2026-03-16");
+        assert_eq!(state.accumulated_minutes, 45.5);
+        assert!(state.intervals.is_empty());
+        assert!(state.open.is_empty());
     }
 
     #[test]
@@ -380,13 +391,5 @@ mod tests {
         let contents = std::fs::read_to_string(paths.state()).unwrap();
         let parsed: State = toml::from_str(&contents).unwrap();
         assert_eq!(parsed.date, "2026-03-16");
-    }
-
-    #[test]
-    fn fmt_float_keeps_decimal() {
-        assert_eq!(fmt_float(0.0), "0.0");
-        assert_eq!(fmt_float(180.0), "180.0");
-        assert_eq!(fmt_float(45.5), "45.5");
-        assert_eq!(fmt_float(1710567890.123), "1710567890.123");
     }
 }

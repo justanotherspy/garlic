@@ -53,9 +53,27 @@ pub struct IgnoreRequest {
     pub set: Option<bool>,
 }
 
+/// Event body: the client's [`TimeConfig`] plus the `session_id` the interval
+/// is attributed to. Both are optional, so an empty body still behaves like an
+/// unconfigured, single-session client.
+#[derive(Debug, Default, Deserialize)]
+pub struct EventRequest {
+    #[serde(flatten)]
+    pub config: TimeConfig,
+    pub session_id: Option<String>,
+}
+
 fn parse_config(body: &Bytes) -> Result<TimeConfig, AppError> {
     if body.is_empty() {
         return Ok(TimeConfig::default());
+    }
+    serde_json::from_slice(body)
+        .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))
+}
+
+fn parse_event(body: &Bytes) -> Result<EventRequest, AppError> {
+    if body.is_empty() {
+        return Ok(EventRequest::default());
     }
     serde_json::from_slice(body)
         .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))
@@ -67,6 +85,15 @@ fn parse_ignore(body: &Bytes) -> Result<IgnoreRequest, AppError> {
     }
     serde_json::from_slice(body)
         .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))
+}
+
+/// Session attribution for an event, defaulting to a single shared session.
+fn session_of(req: &EventRequest) -> String {
+    req.session_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default")
+        .to_string()
 }
 
 /// `GET /health` — liveness plus Redis reachability.
@@ -115,13 +142,15 @@ pub async fn post_session_start(
     body: Bytes,
 ) -> Result<Json<StateResponse>, AppError> {
     let ns = authenticate(&headers, &app.config)?;
-    let config = parse_config(&body)?;
+    let req = parse_event(&body)?;
+    let session = session_of(&req);
+    let config = req.config;
     let clock = app.clock.clone();
     let (state, _) = app
         .store
         .mutate(&ns, move |s| {
             engine::apply_rollover(s, config.reset_hour, clock.as_ref());
-            engine::apply_session_start(s, clock.as_ref());
+            engine::apply_session_start(s, &session, clock.as_ref());
         })
         .await?;
     Ok(Json(StateResponse::plain(state)))
@@ -134,13 +163,15 @@ pub async fn post_prompt(
     body: Bytes,
 ) -> Result<Json<StateResponse>, AppError> {
     let ns = authenticate(&headers, &app.config)?;
-    let config = parse_config(&body)?;
+    let req = parse_event(&body)?;
+    let session = session_of(&req);
+    let config = req.config;
     let clock = app.clock.clone();
     let (state, (crossed, bedtime)) = app
         .store
         .mutate(&ns, move |s| {
             engine::apply_rollover(s, config.reset_hour, clock.as_ref());
-            let crossed = engine::apply_prompt(s, &config, clock.as_ref());
+            let crossed = engine::apply_prompt(s, &config, &session, clock.as_ref());
             // Mirror hook_prompt: only consider bedtime when no threshold was
             // crossed and nudging isn't paused (check_bedtime has a side effect).
             let bedtime = if crossed.is_none() && !s.ignored {
@@ -165,13 +196,15 @@ pub async fn post_stop(
     body: Bytes,
 ) -> Result<Json<StateResponse>, AppError> {
     let ns = authenticate(&headers, &app.config)?;
-    let config = parse_config(&body)?;
+    let req = parse_event(&body)?;
+    let session = session_of(&req);
+    let config = req.config;
     let clock = app.clock.clone();
     let (state, _) = app
         .store
         .mutate(&ns, move |s| {
             engine::apply_rollover(s, config.reset_hour, clock.as_ref());
-            engine::apply_stop(s, &config, clock.as_ref());
+            engine::apply_stop(s, &config, &session, clock.as_ref());
         })
         .await?;
     Ok(Json(StateResponse::plain(state)))
@@ -184,13 +217,15 @@ pub async fn post_session_end(
     body: Bytes,
 ) -> Result<Json<StateResponse>, AppError> {
     let ns = authenticate(&headers, &app.config)?;
-    let config = parse_config(&body)?;
+    let req = parse_event(&body)?;
+    let session = session_of(&req);
+    let config = req.config;
     let clock = app.clock.clone();
     let (state, _) = app
         .store
         .mutate(&ns, move |s| {
             engine::apply_rollover(s, config.reset_hour, clock.as_ref());
-            engine::apply_session_end(s, &config, clock.as_ref());
+            engine::apply_session_end(s, &config, &session, clock.as_ref());
         })
         .await?;
     Ok(Json(StateResponse::plain(state)))

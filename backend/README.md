@@ -96,28 +96,35 @@ status (`401` unauthorized, `400` bad body, `503` busy/Redis down, `500` other).
 ### State
 
 Mutating endpoints accept an optional JSON **config** body. Any omitted field
-falls back to garlic's default, so `{}` (or no body at all) is valid:
+falls back to garlic's default, so `{}` (or no body at all) is valid. The four
+`/v1/events/*` endpoints additionally accept a `session_id` so the backend can
+attribute intervals to the session that produced the event (it defaults to
+`"default"` when omitted). The server stamps every interval boundary with its
+own clock — clients never send timestamps.
 
 ```json
 {
   "max_prompt_gap_minutes": 40,
   "max_generation_minutes": 120,
   "reset_hour": 2,
-  "nudge_thresholds_minutes": [30, 60, 90, 120, 150, 180, 210, 240]
+  "nudge_thresholds_minutes": [30, 60, 90, 120, 150, 180, 210, 240],
+  "session_id": "abc123"
 }
 ```
 
-| Method | Path                         | Body            | Purpose                                                            |
-| ------ | ---------------------------- | --------------- | ------------------------------------------------------------------ |
-| `GET`  | `/v1/state?reset_hour=N`     | —               | Current state (applies daily rollover). `reset_hour` defaults `2`. |
-| `POST` | `/v1/events/session-start`   | config          | Stamp `last_event_time` (SessionStart hook).                       |
-| `POST` | `/v1/events/prompt`          | config          | Accumulate thinking gap; report any crossed threshold + bedtime.   |
-| `POST` | `/v1/events/stop`            | config          | Accumulate generation time (clamped to `max_generation_minutes`).  |
-| `POST` | `/v1/events/session-end`     | config          | Finalize in-flight time and clear `last_event_time`.               |
-| `POST` | `/v1/ignore`                 | config + `set?` | Toggle (or set, via `"set": true/false`) the daily nudge pause.    |
-| `POST` | `/v1/reset`                  | config          | Zero today's timer (history preserved).                            |
+| Method | Path                         | Body              | Purpose                                                            |
+| ------ | ---------------------------- | ----------------- | ------------------------------------------------------------------ |
+| `GET`  | `/v1/state?reset_hour=N`     | —                 | Current state (applies daily rollover). `reset_hour` defaults `2`. |
+| `POST` | `/v1/events/session-start`   | config + session  | Open the session's user-thinking interval (SessionStart hook).     |
+| `POST` | `/v1/events/prompt`          | config + session  | Close user / open agent interval; report crossed threshold + bedtime. |
+| `POST` | `/v1/events/stop`            | config + session  | Close agent interval (clamped to `max_generation_minutes`) / open user. |
+| `POST` | `/v1/events/session-end`     | config + session  | Finalize the session's in-flight interval and drop its cursor.     |
+| `POST` | `/v1/ignore`                 | config + `set?`   | Toggle (or set, via `"set": true/false`) the daily nudge pause.    |
+| `POST` | `/v1/reset`                  | config            | Zero today's timer (history preserved).                            |
 
-Every state endpoint returns the same envelope:
+Every state endpoint returns the same envelope. `accumulated_minutes` is the
+**union** of all intervals' wall-clock (concurrent sessions are not
+double-counted), and `intervals`/`open` carry the per-session agent/user spans:
 
 ```json
 {
@@ -128,7 +135,12 @@ Every state endpoint returns the same envelope:
     "nudges_given": [30, 60],
     "ignored": false,
     "bedtime_nudge_given": false,
-    "history": [{ "date": "2026-05-21", "minutes": 210.0 }]
+    "history": [{ "date": "2026-05-21", "minutes": 210.0 }],
+    "intervals": [
+      { "session_id": "abc123", "kind": "user", "start": 1779495000.0, "end": 1779495180.0 },
+      { "session_id": "abc123", "kind": "agent", "start": 1779495180.0, "end": 1779495417.55 }
+    ],
+    "open": []
   },
   "crossed_threshold": 60,
   "bedtime": false
@@ -154,7 +166,7 @@ curl -s -X POST "$URL/v1/events/session-start" \
 
 curl -s -X POST "$URL/v1/events/prompt" \
   -H "Authorization: Bearer $TOK" -H 'Content-Type: application/json' \
-  -d '{"nudge_thresholds_minutes":[30,60,90,120],"max_prompt_gap_minutes":40}'
+  -d '{"nudge_thresholds_minutes":[30,60,90,120],"max_prompt_gap_minutes":40,"session_id":"abc123"}'
 
 curl -s "$URL/v1/state?reset_hour=2" -H "Authorization: Bearer $TOK"
 ```

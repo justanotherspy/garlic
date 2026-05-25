@@ -8,7 +8,157 @@
 
 use chrono::{Duration, Timelike};
 
-use crate::model::{HistoryEntry, State, TimeConfig, HISTORY_MAX};
+use crate::model::{HistoryEntry, Interval, Kind, OpenCursor, State, TimeConfig, HISTORY_MAX};
+
+/// Intervals closer than this (seconds) are treated as abutting for coalescing.
+const COALESCE_EPSILON_SECS: f64 = 1.0;
+
+/// Per-day derived totals (minutes): union total, per-kind unions, and the
+/// concurrent (2+ sessions) wall-clock time tracked as a neutral fact.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct DayBreakdown {
+    pub total: f64,
+    pub agent: f64,
+    pub user: f64,
+    pub overlap: f64,
+}
+
+/// Sweep-line over closed intervals; unions overlapping time so two parallel
+/// agents over the same wall-clock hour count once, and reports concurrency.
+pub fn breakdown(intervals: &[Interval]) -> DayBreakdown {
+    let mut events: Vec<(f64, i32, Kind)> = Vec::with_capacity(intervals.len() * 2);
+    for iv in intervals {
+        if iv.end <= iv.start {
+            continue;
+        }
+        events.push((iv.start, 1, iv.kind));
+        events.push((iv.end, -1, iv.kind));
+    }
+    if events.is_empty() {
+        return DayBreakdown::default();
+    }
+    events.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let (mut total, mut agent, mut user, mut overlap) = (0.0, 0.0, 0.0, 0.0);
+    let (mut active, mut active_agent, mut active_user) = (0i32, 0i32, 0i32);
+    let mut last: Option<f64> = None;
+    for (t, delta, kind) in events {
+        if let Some(prev) = last {
+            let dt = t - prev;
+            if dt > 0.0 {
+                if active >= 1 {
+                    total += dt;
+                }
+                if active >= 2 {
+                    overlap += dt;
+                }
+                if active_agent >= 1 {
+                    agent += dt;
+                }
+                if active_user >= 1 {
+                    user += dt;
+                }
+            }
+        }
+        active += delta;
+        match kind {
+            Kind::Agent => active_agent += delta,
+            Kind::User => active_user += delta,
+        }
+        last = Some(t);
+    }
+    DayBreakdown {
+        total: total / 60.0,
+        agent: agent / 60.0,
+        user: user / 60.0,
+        overlap: overlap / 60.0,
+    }
+}
+
+/// Append a closed interval, coalescing into the same session's most recent
+/// interval when they share a kind and abut.
+fn push_interval(intervals: &mut Vec<Interval>, iv: Interval) {
+    if iv.end <= iv.start {
+        return;
+    }
+    if let Some(prev) = intervals
+        .iter_mut()
+        .rev()
+        .find(|p| p.session_id == iv.session_id)
+    {
+        if prev.kind == iv.kind && (iv.start - prev.end).abs() <= COALESCE_EPSILON_SECS {
+            prev.end = iv.end.max(prev.end);
+            return;
+        }
+    }
+    intervals.push(iv);
+}
+
+fn take_cursor(state: &mut State, session_id: &str) -> Option<OpenCursor> {
+    state
+        .open
+        .iter()
+        .position(|c| c.session_id == session_id)
+        .map(|pos| state.open.remove(pos))
+}
+
+fn open_cursor(state: &mut State, session_id: &str, kind: Kind, now: f64) {
+    state.open.retain(|c| c.session_id != session_id);
+    state.open.push(OpenCursor {
+        session_id: session_id.to_string(),
+        kind,
+        start: now,
+    });
+}
+
+/// Close `session_id`'s open cursor into an interval, applying the rule for its
+/// stored kind (user gaps over the cap dropped; agent time clamped).
+fn close_cursor(state: &mut State, config: &TimeConfig, session_id: &str, now: f64) {
+    let Some(cursor) = take_cursor(state, session_id) else {
+        return;
+    };
+    let end = match cursor.kind {
+        Kind::User => {
+            let raw_gap = (now - cursor.start) / 60.0;
+            if raw_gap > config.max_prompt_gap_minutes {
+                return;
+            }
+            now
+        }
+        Kind::Agent => {
+            let cap_secs = config.max_generation_minutes * 60.0;
+            cursor.start + (now - cursor.start).min(cap_secs)
+        }
+    };
+    seed_baseline(state, cursor.start);
+    push_interval(
+        &mut state.intervals,
+        Interval {
+            session_id: cursor.session_id,
+            kind: cursor.kind,
+            start: cursor.start,
+            end,
+        },
+    );
+}
+
+/// Preserve a pre-interval `accumulated_minutes` as one synthetic agent
+/// interval on the first interval recorded after the backend upgrade.
+fn seed_baseline(state: &mut State, anchor: f64) {
+    if state.intervals.is_empty() && state.accumulated_minutes > 0.0 {
+        let start = anchor - state.accumulated_minutes * 60.0;
+        state.intervals.push(Interval {
+            session_id: "migrated".to_string(),
+            kind: Kind::Agent,
+            start,
+            end: anchor,
+        });
+    }
+}
+
+fn recompute_total(state: &mut State) {
+    state.accumulated_minutes = breakdown(&state.intervals).total;
+}
 
 /// Source of "now". The real implementation uses the server's wall clock and
 /// local timezone (via `TZ`); tests inject a fixed clock.
@@ -78,54 +228,47 @@ pub fn apply_rollover(state: &mut State, reset_hour: u32, clock: &dyn Clock) -> 
     true
 }
 
-/// Record a session-start timestamp (mirrors `handle_session_start`).
-pub fn apply_session_start(state: &mut State, clock: &dyn Clock) {
-    state.last_event_time = clock.now_unix();
+/// Open a user-thinking cursor for `session_id` (mirrors `handle_session_start`).
+pub fn apply_session_start(state: &mut State, session_id: &str, clock: &dyn Clock) {
+    open_cursor(state, session_id, Kind::User, clock.now_unix());
 }
 
-/// Accumulate the user's thinking gap (capped, dropped if over the cap) and
-/// return the highest newly-crossed nudge threshold, if any.
-///
-/// Mirrors `handle_prompt` + `_check_thresholds`.
-pub fn apply_prompt(state: &mut State, config: &TimeConfig, clock: &dyn Clock) -> Option<i64> {
+/// Close the session's user-thinking interval, open an agent interval, and
+/// return the highest newly-crossed nudge threshold (mirrors `handle_prompt`).
+pub fn apply_prompt(
+    state: &mut State,
+    config: &TimeConfig,
+    session_id: &str,
+    clock: &dyn Clock,
+) -> Option<i64> {
     let now = clock.now_unix();
-    let last = state.last_event_time;
-    if last > 0.0 {
-        let raw_gap = (now - last) / 60.0;
-        let gap = if raw_gap <= config.max_prompt_gap_minutes {
-            raw_gap
-        } else {
-            0.0
-        };
-        state.accumulated_minutes += gap;
-    }
-    state.last_event_time = now;
+    close_cursor(state, config, session_id, now);
+    open_cursor(state, session_id, Kind::Agent, now);
+    recompute_total(state);
     check_thresholds(state, config)
 }
 
-/// Accumulate generation time, clamped to `max_generation_minutes`
-/// (mirrors `handle_stop`).
-pub fn apply_stop(state: &mut State, config: &TimeConfig, clock: &dyn Clock) {
-    accumulate_generation(state, config, clock);
-    // handle_stop leaves last_event_time at `now` (set inside the helper).
-}
-
-/// Finalize in-flight generation time and clear `last_event_time` so a killed
-/// session can't leak time into the next one (mirrors `handle_session_end`).
-pub fn apply_session_end(state: &mut State, config: &TimeConfig, clock: &dyn Clock) {
-    accumulate_generation(state, config, clock);
-    state.last_event_time = 0.0;
-}
-
-fn accumulate_generation(state: &mut State, config: &TimeConfig, clock: &dyn Clock) {
+/// Close the session's agent interval (clamped) and open a user-thinking
+/// interval (mirrors `handle_stop`).
+pub fn apply_stop(state: &mut State, config: &TimeConfig, session_id: &str, clock: &dyn Clock) {
     let now = clock.now_unix();
-    let last = state.last_event_time;
-    if last > 0.0 {
-        let raw_gap = (now - last) / 60.0;
-        let gap = raw_gap.min(config.max_generation_minutes);
-        state.accumulated_minutes += gap;
-    }
-    state.last_event_time = now;
+    close_cursor(state, config, session_id, now);
+    open_cursor(state, session_id, Kind::User, now);
+    recompute_total(state);
+}
+
+/// Finalize the session's in-flight interval and drop its cursor so a killed
+/// session can't leak time into the next one (mirrors `handle_session_end`).
+pub fn apply_session_end(
+    state: &mut State,
+    config: &TimeConfig,
+    session_id: &str,
+    clock: &dyn Clock,
+) {
+    let now = clock.now_unix();
+    close_cursor(state, config, session_id, now);
+    state.open.retain(|c| c.session_id != session_id);
+    recompute_total(state);
 }
 
 /// Return the highest threshold newly crossed this call, marking it as given.
@@ -165,6 +308,8 @@ pub fn reset_daily(state: &mut State) {
     state.ignored = false;
     state.last_event_time = 0.0;
     state.bedtime_nudge_given = false;
+    state.intervals.clear();
+    state.open.clear();
 }
 
 /// Set or toggle the `ignored` flag; returns the new value.
@@ -223,93 +368,108 @@ mod tests {
     }
 
     #[test]
-    fn prompt_accumulates_capped_gap() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
-        let mut state = State {
-            last_event_time: now - 300.0, // 5 minutes ago
-            ..State::default()
-        };
-        apply_prompt(&mut state, &config(), &clock);
+    fn prompt_then_stop_splits_user_and_agent() {
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State::default();
+        apply_session_start(&mut state, "a", &clock);
+        clock.set_unix(base + 180.0); // 3m thinking
+        apply_prompt(&mut state, &config(), "a", &clock);
+        clock.set_unix(base + 300.0); // 2m generation
+        apply_stop(&mut state, &config(), "a", &clock);
+        let b = breakdown(&state.intervals);
+        assert!((b.user - 3.0).abs() < 0.01);
+        assert!((b.agent - 2.0).abs() < 0.01);
         assert!((state.accumulated_minutes - 5.0).abs() < 0.01);
-        assert_eq!(state.last_event_time, now);
     }
 
     #[test]
     fn prompt_drops_gap_over_cap() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
-        let mut state = State {
-            last_event_time: now - 1800.0, // 30 minutes ago, cap is 10
-            ..State::default()
-        };
-        apply_prompt(&mut state, &config(), &clock);
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State::default();
+        apply_session_start(&mut state, "a", &clock);
+        clock.set_unix(base + 1800.0); // 30m > cap 10
+        apply_prompt(&mut state, &config(), "a", &clock);
         assert_eq!(state.accumulated_minutes, 0.0);
     }
 
     #[test]
-    fn first_prompt_does_not_accumulate() {
+    fn first_prompt_without_start_only_opens_agent() {
         let now = 1_710_567_900.0;
         let clock = FixedClock::new(now);
         let mut state = State::default();
-        apply_prompt(&mut state, &config(), &clock);
+        apply_prompt(&mut state, &config(), "a", &clock);
         assert_eq!(state.accumulated_minutes, 0.0);
-        assert_eq!(state.last_event_time, now);
+        assert_eq!(state.open.len(), 1);
+        assert_eq!(state.open[0].kind, Kind::Agent);
     }
 
     #[test]
-    fn prompt_crosses_threshold_marks_only_highest() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
+    fn threshold_crosses_on_union_total() {
         let mut state = State {
-            accumulated_minutes: 58.0,
-            last_event_time: now - 300.0,
+            accumulated_minutes: 61.0,
             ..State::default()
         };
-        let crossed = apply_prompt(&mut state, &config(), &clock);
-        assert_eq!(crossed, Some(60));
+        assert_eq!(check_thresholds(&mut state, &config()), Some(60));
         assert!(state.nudges_given.contains(&60));
     }
 
     #[test]
     fn threshold_fires_once() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
         let mut state = State {
-            accumulated_minutes: 65.0,
+            accumulated_minutes: 66.0,
             nudges_given: vec![60],
-            last_event_time: now - 60.0,
             ..State::default()
         };
-        // Only 1 minute gap; still at ~66m, 60 already given, 120 not reached.
-        let crossed = apply_prompt(&mut state, &config(), &clock);
-        assert_eq!(crossed, None);
+        assert_eq!(check_thresholds(&mut state, &config()), None);
     }
 
     #[test]
     fn stop_clamps_generation_time() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
-        let mut state = State {
-            last_event_time: now - 9000.0, // 150 minutes, clamps to 120
-            ..State::default()
-        };
-        apply_stop(&mut state, &config(), &clock);
-        assert!((state.accumulated_minutes - 120.0).abs() < 0.01);
-        assert_eq!(state.last_event_time, now);
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State::default();
+        apply_session_start(&mut state, "a", &clock);
+        clock.set_unix(base + 60.0); // 1m thinking
+        apply_prompt(&mut state, &config(), "a", &clock); // open agent
+        clock.set_unix(base + 60.0 + 9000.0); // 150m generation, clamps to 120
+        apply_stop(&mut state, &config(), "a", &clock);
+        let b = breakdown(&state.intervals);
+        assert!((b.agent - 120.0).abs() < 0.01);
     }
 
     #[test]
-    fn session_end_clears_last_event_time() {
-        let now = 1_710_567_900.0;
-        let clock = FixedClock::new(now);
-        let mut state = State {
-            last_event_time: now - 600.0, // 10 minutes
-            ..State::default()
-        };
-        apply_session_end(&mut state, &config(), &clock);
-        assert!((state.accumulated_minutes - 10.0).abs() < 0.01);
-        assert_eq!(state.last_event_time, 0.0);
+    fn session_end_finalizes_and_drops_cursor() {
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State::default();
+        apply_session_start(&mut state, "a", &clock);
+        clock.set_unix(base + 60.0);
+        apply_prompt(&mut state, &config(), "a", &clock); // open agent
+        clock.set_unix(base + 60.0 + 600.0); // 10m generation
+        apply_session_end(&mut state, &config(), "a", &clock);
+        assert!(state.open.iter().all(|c| c.session_id != "a"));
+        assert!((breakdown(&state.intervals).agent - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parallel_sessions_union_and_overlap() {
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State::default();
+        apply_session_start(&mut state, "a", &clock);
+        apply_session_start(&mut state, "b", &clock);
+        clock.set_unix(base + 60.0);
+        apply_prompt(&mut state, &config(), "a", &clock); // user a [0,1]
+        apply_prompt(&mut state, &config(), "b", &clock); // user b [0,1]
+        clock.set_unix(base + 300.0);
+        apply_stop(&mut state, &config(), "a", &clock); // agent a [1,5]
+        clock.set_unix(base + 360.0);
+        apply_stop(&mut state, &config(), "b", &clock); // agent b [1,6]
+        let b = breakdown(&state.intervals);
+        assert!((b.total - 6.0).abs() < 0.01);
+        assert!((b.overlap - 5.0).abs() < 0.01);
     }
 
     #[test]
