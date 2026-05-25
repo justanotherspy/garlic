@@ -96,20 +96,27 @@ pub fn cmd_status(
 ) -> i32 {
     let config = load_config(paths);
 
-    // Load this machine's state for the relevant day. The today view uses the
-    // real clock; the week/month views take an injected clock so they stay
-    // deterministic under test.
-    let local = if week || month {
+    // Week/month are retrospective summaries built from per-day history, which
+    // the local state always has in full. The backend's history can have gaps
+    // in the default (non-blocking) mode — it's only built when the backend
+    // processes a request — so these views stay purely local. Only the live
+    // "today" view below consults the backend for the merged cross-machine
+    // total.
+    if week || month {
         let today = shift(now_local, config.reset_hour).date();
-        load_state_for_date(paths, &today.format("%Y-%m-%d").to_string())
-    } else {
-        load_state(paths, config.reset_hour)
-    };
+        let state = load_state_for_date(paths, &today.format("%Y-%m-%d").to_string());
+        return if week {
+            week_core(&state, &config, today, out)
+        } else {
+            stats_core(&state, today, out)
+        };
+    }
 
     // Local-first: when a backend is configured, flush this machine's intervals
     // and read back the merged (shared) total in one round trip. If it's
     // unreachable, fall back to local state with a note — we always have data,
     // so an offline backend never blocks a status check.
+    let local = load_state(paths, config.reset_hour);
     let state = match remote {
         Some(r) => match r.push_intervals(&config, &local.intervals, false) {
             Ok(resp) => resp.state,
@@ -123,16 +130,6 @@ pub fn cmd_status(
         },
         None => local,
     };
-
-    if week || month {
-        let today = NaiveDate::parse_from_str(&state.date, "%Y-%m-%d")
-            .unwrap_or_else(|_| shift(now_local, config.reset_hour).date());
-        return if week {
-            week_core(&state, &config, today, out)
-        } else {
-            stats_core(&state, today, out)
-        };
-    }
     status_core(&state, &config, json, out)
 }
 
