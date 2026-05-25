@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, Timelike};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 
 use crate::config::{load_config, save_config, Config, CONFIG_KEYS, VALID_NUDGE_STYLES};
 use crate::format::format_duration;
@@ -83,25 +83,56 @@ pub fn cmd_version(paths: &Paths, now: f64, out: &mut dyn Write) -> i32 {
     0
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_status(
+    remote: Option<&Remote>,
     paths: &Paths,
     json: bool,
     week: bool,
     month: bool,
     now_local: NaiveDateTime,
     out: &mut dyn Write,
+    err: &mut dyn Write,
 ) -> i32 {
     let config = load_config(paths);
-    if week || month {
+
+    // Load this machine's state for the relevant day. The today view uses the
+    // real clock; the week/month views take an injected clock so they stay
+    // deterministic under test.
+    let local = if week || month {
         let today = shift(now_local, config.reset_hour).date();
-        let state = load_state_for_date(paths, &today.format("%Y-%m-%d").to_string());
+        load_state_for_date(paths, &today.format("%Y-%m-%d").to_string())
+    } else {
+        load_state(paths, config.reset_hour)
+    };
+
+    // Local-first: when a backend is configured, flush this machine's intervals
+    // and read back the merged (shared) total in one round trip. If it's
+    // unreachable, fall back to local state with a note — we always have data,
+    // so an offline backend never blocks a status check.
+    let state = match remote {
+        Some(r) => match r.push_intervals(&config, &local.intervals, false) {
+            Ok(resp) => resp.state,
+            Err(e) => {
+                let _ = writeln!(
+                    err,
+                    "garlic: shared backend unavailable ({e}); showing local time"
+                );
+                local
+            }
+        },
+        None => local,
+    };
+
+    if week || month {
+        let today = NaiveDate::parse_from_str(&state.date, "%Y-%m-%d")
+            .unwrap_or_else(|_| shift(now_local, config.reset_hour).date());
         return if week {
             week_core(&state, &config, today, out)
         } else {
             stats_core(&state, today, out)
         };
     }
-    let state = load_state(paths, config.reset_hour);
     status_core(&state, &config, json, out)
 }
 
@@ -479,11 +510,26 @@ fn weekday_abbr(d: NaiveDate) -> &'static str {
     WEEKDAY_ABBR[d.weekday().num_days_from_monday() as usize]
 }
 
-pub fn cmd_ignore(paths: &Paths, out: &mut dyn Write) -> i32 {
+pub fn cmd_ignore(
+    remote: Option<&Remote>,
+    paths: &Paths,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
     state.ignored = !state.ignored;
     let _ = save_state(paths, &state);
+    // Mirror the new flag to the shared backend so other machines agree; the
+    // local toggle has already taken effect regardless of reachability.
+    if let Some(r) = remote {
+        if let Err(e) = r.ignore(&config, Some(state.ignored)) {
+            let _ = writeln!(
+                err,
+                "garlic: shared backend unavailable ({e}); applied locally only"
+            );
+        }
+    }
     write_ignore_state(out, state.ignored);
     0
 }
@@ -668,7 +714,14 @@ fn ask_reset(yes: bool, confirm: &mut dyn Confirm, out: &mut dyn Write) -> Reset
     }
 }
 
-pub fn cmd_reset(paths: &Paths, yes: bool, confirm: &mut dyn Confirm, out: &mut dyn Write) -> i32 {
+pub fn cmd_reset(
+    remote: Option<&Remote>,
+    paths: &Paths,
+    yes: bool,
+    confirm: &mut dyn Confirm,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
     match ask_reset(yes, confirm, out) {
         ResetChoice::Proceed => {}
         ResetChoice::Cancelled => return 0,
@@ -682,9 +735,56 @@ pub fn cmd_reset(paths: &Paths, yes: bool, confirm: &mut dyn Confirm, out: &mut 
     state.ignored = false;
     state.last_event_time = 0.0;
     state.bedtime_nudge_given = false;
+    // Clear the intervals too, otherwise the next sync would re-push them and
+    // resurrect the total we just zeroed.
+    state.intervals.clear();
+    state.open.clear();
     let _ = save_state(paths, &state);
+    if let Some(r) = remote {
+        if let Err(e) = r.reset(&config) {
+            let _ = writeln!(
+                err,
+                "garlic: shared backend unavailable ({e}); reset locally only"
+            );
+        }
+    }
     let _ = writeln!(out, "garlic: timer reset for today");
     0
+}
+
+/// `garlic sync` — push this machine's locally-accounted intervals to the
+/// shared backend and report the merged total. This is the explicit drain for
+/// the outbox, e.g. a laptop cron job running outside a network-restricted
+/// sandbox. A no-op (with guidance) when no backend is configured.
+pub fn cmd_sync(
+    remote: Option<&Remote>,
+    paths: &Paths,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> i32 {
+    let Some(r) = remote else {
+        let _ = writeln!(
+            err,
+            "garlic: no backend configured (set GARLIC_URL and GARLIC_TOKEN to enable shared state)"
+        );
+        return 1;
+    };
+    let config = load_config(paths);
+    let state = load_state(paths, config.reset_hour);
+    match r.push_intervals(&config, &state.intervals, false) {
+        Ok(resp) => {
+            let _ = writeln!(
+                out,
+                "{GARLIC} synced \u{2014} {} of active coding today (shared)",
+                format_duration(resp.state.accumulated_minutes)
+            );
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(err, "garlic: sync failed: {e}");
+            1
+        }
+    }
 }
 
 /// Interactively prompt for config values. Returns `None` if cancelled (EOF).
@@ -866,107 +966,15 @@ pub fn cmd_setup(
     if defaults {
         let _ = writeln!(out, "garlic: config reset to built-in defaults");
     }
+    if Remote::from_env().is_some() {
+        let _ = writeln!(
+            out,
+            "garlic: shared backend detected — hooks track locally and sync to it.\n\
+             \x20      Schedule 'garlic sync' (e.g. cron) to reconcile totals, or set\n\
+             \x20      GARLIC_SYNC=blocking on ephemeral hosts to flush inside each hook."
+        );
+    }
     0
-}
-
-// --- Remote (shared-state backend) command handlers ------------------------
-//
-// When a backend is configured, state lives there; config stays local and is
-// sent with each request. Read commands surface a clear error on failure
-// rather than silently showing stale local numbers.
-
-/// Resolve "today" from a backend-reported state date, falling back to the
-/// local clock if the date is missing or unparseable.
-fn remote_today(date: &str, reset_hour: i64) -> NaiveDate {
-    NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .unwrap_or_else(|_| shift(Local::now().naive_local(), reset_hour).date())
-}
-
-pub fn cmd_status_remote(
-    remote: &Remote,
-    paths: &Paths,
-    json: bool,
-    week: bool,
-    month: bool,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    let config = load_config(paths);
-    match remote.get_state(config.reset_hour) {
-        Ok(resp) => {
-            if week || month {
-                let today = remote_today(&resp.state.date, config.reset_hour);
-                if week {
-                    week_core(&resp.state, &config, today, out)
-                } else {
-                    stats_core(&resp.state, today, out)
-                }
-            } else {
-                status_core(&resp.state, &config, json, out)
-            }
-        }
-        Err(e) => {
-            let _ = writeln!(err, "garlic: {e}");
-            1
-        }
-    }
-}
-
-pub fn cmd_statusline_remote(remote: &Remote, paths: &Paths, out: &mut dyn Write) -> i32 {
-    let config = load_config(paths);
-    match remote.get_state(config.reset_hour) {
-        Ok(resp) => statusline_core(&resp.state, &config, out),
-        // The status bar always needs a line; show a muted offline marker.
-        Err(_) => {
-            let _ = writeln!(out, "{GARLIC} --");
-            0
-        }
-    }
-}
-
-pub fn cmd_ignore_remote(
-    remote: &Remote,
-    paths: &Paths,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    let config = load_config(paths);
-    match remote.ignore(&config, None) {
-        Ok(resp) => {
-            write_ignore_state(out, resp.state.ignored);
-            0
-        }
-        Err(e) => {
-            let _ = writeln!(err, "garlic: {e}");
-            1
-        }
-    }
-}
-
-pub fn cmd_reset_remote(
-    remote: &Remote,
-    paths: &Paths,
-    yes: bool,
-    confirm: &mut dyn Confirm,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> i32 {
-    match ask_reset(yes, confirm, out) {
-        ResetChoice::Proceed => {}
-        ResetChoice::Cancelled => return 0,
-        ResetChoice::Eof => return 1,
-    }
-    let config = load_config(paths);
-    match remote.reset(&config) {
-        Ok(_) => {
-            let _ = writeln!(out, "garlic: timer reset for today");
-            0
-        }
-        Err(e) => {
-            let _ = writeln!(err, "garlic: {e}");
-            1
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1223,7 +1231,11 @@ mod tests {
         );
         let mut confirm = ScriptedConfirm::new(vec![]);
         let mut out = Vec::new();
-        assert_eq!(cmd_reset(&paths, true, &mut confirm, &mut out), 0);
+        let mut err = Vec::new();
+        assert_eq!(
+            cmd_reset(None, &paths, true, &mut confirm, &mut out, &mut err),
+            0
+        );
         assert!(String::from_utf8(out).unwrap().contains("timer reset"));
         let state = load_state(&paths, 2);
         assert_eq!(state.accumulated_minutes, 0.0);
@@ -1242,7 +1254,8 @@ mod tests {
         );
         let mut confirm = ScriptedConfirm::new(vec![Some("y")]);
         let mut out = Vec::new();
-        cmd_reset(&paths, false, &mut confirm, &mut out);
+        let mut err = Vec::new();
+        cmd_reset(None, &paths, false, &mut confirm, &mut out, &mut err);
         assert!(String::from_utf8(out).unwrap().contains("timer reset"));
     }
 
@@ -1258,7 +1271,8 @@ mod tests {
         );
         let mut confirm = ScriptedConfirm::new(vec![Some("n")]);
         let mut out = Vec::new();
-        cmd_reset(&paths, false, &mut confirm, &mut out);
+        let mut err = Vec::new();
+        cmd_reset(None, &paths, false, &mut confirm, &mut out, &mut err);
         assert!(String::from_utf8(out).unwrap().contains("cancelled"));
         assert_eq!(load_state(&paths, 2).accumulated_minutes, 95.0);
     }
@@ -1320,10 +1334,11 @@ mod tests {
         let (_t, paths) = env();
         write_state(&paths, &crate::state::current_date(2), 10.0, vec![], false);
         let mut out = Vec::new();
-        cmd_ignore(&paths, &mut out);
+        let mut err = Vec::new();
+        cmd_ignore(None, &paths, &mut out, &mut err);
         assert!(load_state(&paths, 2).ignored);
         let mut out2 = Vec::new();
-        cmd_ignore(&paths, &mut out2);
+        cmd_ignore(None, &paths, &mut out2, &mut err);
         assert!(!load_state(&paths, 2).ignored);
     }
 
@@ -1343,7 +1358,16 @@ mod tests {
             false,
         );
         let mut out = Vec::new();
-        cmd_status(&paths, true, false, false, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            true,
+            false,
+            false,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.lines().count(), 1);
         let data: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
@@ -1370,7 +1394,16 @@ mod tests {
             false,
         );
         let mut out = Vec::new();
-        cmd_status(&paths, true, false, false, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            true,
+            false,
+            false,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let data: serde_json::Value =
             serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
         assert_eq!(data["next_threshold"], serde_json::Value::Null);
@@ -1475,7 +1508,16 @@ mod tests {
         let (_t, paths) = env();
         write_state_with_history(&paths, "2026-04-14", 0.0, vec![]);
         let mut out = Vec::new();
-        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            false,
+            false,
+            true,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("April 2026"));
         assert!(text.contains("This month:"));
@@ -1500,7 +1542,16 @@ mod tests {
             ],
         );
         let mut out = Vec::new();
-        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            false,
+            false,
+            true,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("6h 00m")); // month total
         assert!(text.contains("4 active days"));
@@ -1520,7 +1571,16 @@ mod tests {
             vec![("2026-04-12", 60.0), ("2026-04-13", 60.0)],
         );
         let mut out = Vec::new();
-        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            false,
+            false,
+            true,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         assert!(String::from_utf8(out)
             .unwrap()
             .contains("Current streak:      2 days"));
@@ -1536,7 +1596,16 @@ mod tests {
             vec![("2026-03-05", 120.0), ("2026-04-04", 60.0)],
         );
         let mut out = Vec::new();
-        cmd_status(&paths, false, false, true, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            false,
+            false,
+            true,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let text = String::from_utf8(out).unwrap();
         let rolling = text.lines().find(|l| l.contains("Rolling 30d")).unwrap();
         assert!(rolling.contains("1h 00m"));
@@ -1553,7 +1622,16 @@ mod tests {
         .unwrap();
         write_state_with_history(&paths, "2026-04-14", 60.0, vec![("2026-04-13", 120.0)]);
         let mut out = Vec::new();
-        cmd_status(&paths, false, true, false, dt(2026, 4, 14), &mut out);
+        cmd_status(
+            None,
+            &paths,
+            false,
+            true,
+            false,
+            dt(2026, 4, 14),
+            &mut out,
+            &mut Vec::new(),
+        );
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("Weekly usage (last 7 days)"));
         assert!(text.contains("today"));

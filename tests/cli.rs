@@ -277,25 +277,32 @@ fn setup_installs_hooks_and_command() {
 }
 
 // --- Remote (shared-state backend) integration ---------------------------
+//
+// garlic is local-first: hooks always write `state.toml`; a configured backend
+// is a sync peer that merges intervals (`POST /v1/intervals`) and returns the
+// shared total. Hooks only flush inline when `GARLIC_SYNC=blocking` is set.
 
-fn remote_state_body(minutes: f64, nudges: &str) -> String {
+fn intervals_response(minutes: f64, nudges: &str, crossed: &str) -> String {
     format!(
-        r#"{{"state":{{"date":"{date}","accumulated_minutes":{minutes},"last_event_time":0.0,"nudges_given":{nudges},"ignored":false,"bedtime_nudge_given":false,"history":[]}},"crossed_threshold":null,"bedtime":false}}"#,
+        r#"{{"state":{{"date":"{date}","accumulated_minutes":{minutes},"last_event_time":0.0,"nudges_given":{nudges},"ignored":false,"bedtime_nudge_given":false,"history":[],"intervals":[],"open":[]}},"crossed_threshold":{crossed},"bedtime":false}}"#,
         date = current_date(2),
     )
 }
 
 #[test]
-fn remote_status_reads_from_backend_not_local() {
+fn status_flushes_and_shows_shared_total() {
     let server = MockServer::start();
+    // status pushes local intervals to the merge endpoint and renders the
+    // merged total it gets back.
     let m = server.mock(|when, then| {
-        when.method(GET)
-            .path("/v1/state")
+        when.method(POST)
+            .path("/v1/intervals")
             .header("authorization", "Bearer tok");
-        then.status(200).body(remote_state_body(123.0, "[60]"));
+        then.status(200)
+            .body(intervals_response(123.0, "[60]", "null"));
     });
 
-    // Seed a *different* local total to prove the remote value wins.
+    // Seed a *different* local total to prove the merged value wins.
     let tmp = seeded(State {
         date: current_date(2),
         accumulated_minutes: 45.0,
@@ -313,24 +320,66 @@ fn remote_status_reads_from_backend_not_local() {
 }
 
 #[test]
-fn remote_hook_prompt_nudges_from_backend() {
+fn sync_pushes_local_intervals_to_backend() {
     let server = MockServer::start();
-    let body = format!(
-        r#"{{"state":{{"date":"{date}","accumulated_minutes":60.0,"last_event_time":1.0,"nudges_given":[60],"ignored":false,"bedtime_nudge_given":false,"history":[]}},"crossed_threshold":60,"bedtime":false}}"#,
-        date = current_date(2),
-    );
     let m = server.mock(|when, then| {
-        when.method(POST).path("/v1/events/prompt");
-        then.status(200).body(body);
+        when.method(POST)
+            .path("/v1/intervals")
+            .header("authorization", "Bearer tok");
+        then.status(200)
+            .body(intervals_response(90.0, "[]", "null"));
+    });
+
+    let tmp = seeded(State {
+        date: current_date(2),
+        accumulated_minutes: 45.0,
+        ..State::default()
+    });
+
+    garlic(&gdir(&tmp))
+        .env("GARLIC_URL", server.base_url())
+        .env("GARLIC_TOKEN", "tok")
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("synced"))
+        .stdout(predicate::str::contains("1h 30m"));
+    m.assert();
+}
+
+#[test]
+fn sync_without_backend_reports_error() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".garlic");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    garlic(&dir)
+        .arg("sync")
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("no backend configured"));
+}
+
+#[test]
+fn blocking_hook_prompt_nudges_from_backend() {
+    let server = MockServer::start();
+    let m = server.mock(|when, then| {
+        when.method(POST).path("/v1/intervals");
+        then.status(200)
+            .body(intervals_response(60.0, "[60]", "60"));
     });
 
     let tmp = TempDir::new().unwrap();
     let dir = tmp.path().join(".garlic");
     std::fs::create_dir_all(&dir).unwrap();
 
+    // GARLIC_SYNC=blocking → the prompt hook flushes synchronously and nudges
+    // from the merged (shared) total the backend reports.
     garlic(&dir)
         .env("GARLIC_URL", server.base_url())
         .env("GARLIC_TOKEN", "tok")
+        .env("GARLIC_SYNC", "blocking")
         .args(["hook", "prompt"])
         .write_stdin("{}")
         .assert()
@@ -341,37 +390,58 @@ fn remote_hook_prompt_nudges_from_backend() {
 }
 
 #[test]
-fn remote_status_errors_when_backend_unreachable() {
-    let tmp = TempDir::new().unwrap();
-    let dir = tmp.path().join(".garlic");
-    std::fs::create_dir_all(&dir).unwrap();
+fn status_falls_back_to_local_when_backend_unreachable() {
+    // Local-first: an unreachable backend must not fail a status check — it
+    // shows local time and notes the backend is unavailable.
+    let tmp = seeded(State {
+        date: current_date(2),
+        accumulated_minutes: 45.0,
+        ..State::default()
+    });
 
     // Port 1 refuses connections immediately (no slow timeout).
-    garlic(&dir)
+    garlic(&gdir(&tmp))
         .env("GARLIC_URL", "http://127.0.0.1:1")
         .env("GARLIC_TOKEN", "tok")
-        .arg("status")
+        .args(["status", "--json"])
         .assert()
-        .failure()
-        .code(1)
-        .stderr(predicate::str::contains("garlic:"));
+        .success()
+        .stdout(predicate::str::contains("\"accumulated_minutes\":45.0"))
+        .stderr(predicate::str::contains("shared backend unavailable"));
 }
 
 #[test]
-fn remote_hook_prompt_is_silent_when_backend_unreachable() {
-    let tmp = TempDir::new().unwrap();
-    let dir = tmp.path().join(".garlic");
-    std::fs::create_dir_all(&dir).unwrap();
+fn offline_hook_prompt_still_tracks_locally() {
+    // The motivating case: the backend is unreachable when the hook fires, but
+    // time must still be recorded locally (to sync later). Default mode never
+    // touches the network, so the hook succeeds and accumulates regardless.
+    let tmp = seeded(State {
+        date: current_date(2),
+        accumulated_minutes: 0.0,
+        open: vec![OpenCursor {
+            session_id: "x".to_string(),
+            kind: Kind::User,
+            start: unix_now() - 120.0, // 2m of thinking within the gap cap
+        }],
+        ..State::default()
+    });
+    let dir = gdir(&tmp);
 
-    // A failed backend call must never break a session: succeed silently.
     garlic(&dir)
         .env("GARLIC_URL", "http://127.0.0.1:1")
         .env("GARLIC_TOKEN", "tok")
         .args(["hook", "prompt"])
-        .write_stdin("{}")
+        .write_stdin("{\"session_id\":\"x\"}")
         .assert()
-        .success()
-        .stdout(predicate::str::is_empty());
+        .success();
+
+    // The 2-minute thinking gap was recorded into local state.
+    let state = garlic::state::load_state(&Paths::with_dir(&dir), 2);
+    assert!(
+        state.accumulated_minutes > 1.0,
+        "expected local tracking despite unreachable backend, got {}",
+        state.accumulated_minutes
+    );
 }
 
 #[test]

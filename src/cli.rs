@@ -7,13 +7,10 @@ use chrono::Local;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::commands::{
-    cmd_ignore, cmd_ignore_remote, cmd_reset, cmd_reset_remote, cmd_set, cmd_setup, cmd_status,
-    cmd_status_remote, cmd_statusline, cmd_statusline_remote, cmd_version, Confirm,
+    cmd_ignore, cmd_reset, cmd_set, cmd_setup, cmd_status, cmd_statusline, cmd_sync, cmd_version,
+    Confirm,
 };
-use crate::hooks::{
-    hook_prompt, hook_prompt_remote, hook_session_end, hook_session_end_remote, hook_session_start,
-    hook_session_start_remote, hook_stop, hook_stop_remote,
-};
+use crate::hooks::{hook_prompt, hook_session_end, hook_session_start, hook_stop};
 use crate::paths::{ClaudePaths, Paths};
 use crate::remote::Remote;
 
@@ -58,6 +55,8 @@ enum Command {
     },
     /// Output a compact status line string for Claude Code
     Statusline,
+    /// Push locally-tracked time to the shared backend (for cron/manual sync)
+    Sync,
     /// Toggle nudging for the day
     Ignore,
     /// Update a config value (KEY=VALUE)
@@ -154,30 +153,28 @@ pub fn run() -> i32 {
                 &mut out,
             )
         }
-        Command::Status { json, week, month } => match &remote {
-            Some(r) => cmd_status_remote(r, &paths, json, week, month, &mut out, &mut err),
-            None => cmd_status(
-                &paths,
-                json,
-                week,
-                month,
-                Local::now().naive_local(),
-                &mut out,
-            ),
-        },
-        Command::Statusline => match &remote {
-            Some(r) => cmd_statusline_remote(r, &paths, &mut out),
-            None => cmd_statusline(&paths, &mut out),
-        },
-        Command::Ignore => match &remote {
-            Some(r) => cmd_ignore_remote(r, &paths, &mut out, &mut err),
-            None => cmd_ignore(&paths, &mut out),
-        },
+        Command::Status { json, week, month } => cmd_status(
+            remote.as_ref(),
+            &paths,
+            json,
+            week,
+            month,
+            Local::now().naive_local(),
+            &mut out,
+            &mut err,
+        ),
+        Command::Statusline => cmd_statusline(&paths, &mut out),
+        Command::Sync => cmd_sync(remote.as_ref(), &paths, &mut out, &mut err),
+        Command::Ignore => cmd_ignore(remote.as_ref(), &paths, &mut out, &mut err),
         Command::Set { assignment } => cmd_set(&paths, &assignment, &mut out, &mut err),
-        Command::Reset { yes } => match &remote {
-            Some(r) => cmd_reset_remote(r, &paths, yes, &mut StdinConfirm, &mut out, &mut err),
-            None => cmd_reset(&paths, yes, &mut StdinConfirm, &mut out),
-        },
+        Command::Reset { yes } => cmd_reset(
+            remote.as_ref(),
+            &paths,
+            yes,
+            &mut StdinConfirm,
+            &mut out,
+            &mut err,
+        ),
         Command::Hook { hook_event, debug } => {
             run_hook(&paths, remote.as_ref(), hook_event, debug, &mut out)
         }
@@ -198,24 +195,22 @@ fn run_hook(
     let session_id = parse_session_id(&buf);
 
     let now = unix_now();
-    let result = match (event, remote) {
-        (HookEvent::SessionStart, Some(r)) => {
-            hook_session_start_remote(r, paths, &session_id, debug, out)
-        }
-        (HookEvent::SessionStart, None) => hook_session_start(paths, &session_id, now, debug, out),
-        (HookEvent::Prompt, Some(r)) => hook_prompt_remote(r, paths, &session_id, debug, out),
-        (HookEvent::Prompt, None) => hook_prompt(
+    // Hooks are local-first: they always account time into `state.toml` and
+    // never block on the network. When a backend is configured they sync only
+    // if `GARLIC_SYNC=blocking` is set (the ephemeral/managed-host case).
+    let result = match event {
+        HookEvent::SessionStart => hook_session_start(paths, remote, &session_id, now, debug, out),
+        HookEvent::Prompt => hook_prompt(
             paths,
+            remote,
             &session_id,
             now,
             Local::now().naive_local(),
             debug,
             out,
         ),
-        (HookEvent::Stop, Some(r)) => hook_stop_remote(r, paths, &session_id, debug),
-        (HookEvent::Stop, None) => hook_stop(paths, &session_id, now, debug),
-        (HookEvent::SessionEnd, Some(r)) => hook_session_end_remote(r, paths, &session_id, debug),
-        (HookEvent::SessionEnd, None) => hook_session_end(paths, &session_id, now, debug),
+        HookEvent::Stop => hook_stop(paths, remote, &session_id, now, debug),
+        HookEvent::SessionEnd => hook_session_end(paths, remote, &session_id, now, debug),
     };
     match result {
         Ok(()) => 0,

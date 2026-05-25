@@ -14,6 +14,7 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::config::Config;
+use crate::intervals::Interval;
 use crate::state::State;
 
 /// Per-request timeout. Hooks run on every prompt, so this is kept short: a
@@ -76,14 +77,6 @@ impl Remote {
         })
     }
 
-    /// Event body: config plus the `session_id` the backend attributes the
-    /// interval to.
-    fn event_body(config: &Config, session_id: &str) -> serde_json::Value {
-        let mut body = Self::config_body(config);
-        body["session_id"] = serde_json::json!(session_id);
-        body
-    }
-
     fn auth(&self) -> String {
         format!("Bearer {}", self.token)
     }
@@ -103,30 +96,24 @@ impl Remote {
         parse_body(&url, &text)
     }
 
-    pub fn session_start(
+    /// `POST /v1/intervals` — merge this client's locally-accounted closed
+    /// intervals into the shared total. This is the local-first sync path:
+    /// hooks account time offline and the daily total is reconciled here.
+    ///
+    /// `check_nudges` asks the backend to evaluate thresholds / bedtime against
+    /// the merged total (set only for a prompt in synchronous mode); a plain
+    /// sync leaves it `false`.
+    pub fn push_intervals(
         &self,
         config: &Config,
-        session_id: &str,
+        intervals: &[Interval],
+        check_nudges: bool,
     ) -> Result<RemoteResponse, String> {
-        self.post(
-            "/v1/events/session-start",
-            Self::event_body(config, session_id),
-        )
-    }
-
-    pub fn prompt(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/prompt", Self::event_body(config, session_id))
-    }
-
-    pub fn stop(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
-        self.post("/v1/events/stop", Self::event_body(config, session_id))
-    }
-
-    pub fn session_end(&self, config: &Config, session_id: &str) -> Result<RemoteResponse, String> {
-        self.post(
-            "/v1/events/session-end",
-            Self::event_body(config, session_id),
-        )
+        let mut body = Self::config_body(config);
+        body["intervals"] =
+            serde_json::to_value(intervals).unwrap_or_else(|_| serde_json::json!([]));
+        body["check_nudges"] = serde_json::json!(check_nudges);
+        self.post("/v1/intervals", body)
     }
 
     pub fn reset(&self, config: &Config) -> Result<RemoteResponse, String> {
@@ -194,20 +181,28 @@ mod tests {
     }
 
     #[test]
-    fn prompt_sends_bearer_and_config_and_parses_nudge() {
+    fn push_intervals_sends_bearer_config_and_payload() {
+        use crate::intervals::Kind;
         let server = MockServer::start();
         let m = server.mock(|when, then| {
             when.method(POST)
-                .path("/v1/events/prompt")
+                .path("/v1/intervals")
                 .header("authorization", "Bearer secret")
-                .json_body_includes(r#"{"session_id":"sess-1"}"#)
-                .json_body_includes(r#"{"nudge_thresholds_minutes":[30,60,90,120,150,180,210,240]}"#);
+                .json_body_includes(r#"{"check_nudges":true}"#)
+                .json_body_includes(r#"{"nudge_thresholds_minutes":[30,60,90,120,150,180,210,240]}"#)
+                .json_body_includes(r#"{"intervals":[{"session_id":"sess-1","kind":"agent"}]}"#);
             then.status(200).body(
                 r#"{"state":{"date":"2026-05-23","accumulated_minutes":61.0,"last_event_time":1.0,"nudges_given":[60],"ignored":false,"bedtime_nudge_given":false,"history":[]},"crossed_threshold":60,"bedtime":false}"#,
             );
         });
         let remote = Remote::new(&server.base_url(), "secret").unwrap();
-        let resp = remote.prompt(&config(), "sess-1").unwrap();
+        let intervals = [Interval {
+            session_id: "sess-1".to_string(),
+            kind: Kind::Agent,
+            start: 1000.0,
+            end: 4660.0,
+        }];
+        let resp = remote.push_intervals(&config(), &intervals, true).unwrap();
         m.assert();
         assert_eq!(resp.crossed_threshold, Some(60));
         assert!(!resp.bedtime);
@@ -232,12 +227,12 @@ mod tests {
     fn http_error_status_is_reported() {
         let server = MockServer::start();
         server.mock(|when, then| {
-            when.method(POST).path("/v1/events/stop");
+            when.method(POST).path("/v1/intervals");
             then.status(401).body(r#"{"error":"invalid token"}"#);
         });
         let remote = Remote::new(&server.base_url(), "tok").unwrap();
-        let err = remote.stop(&config(), "sess-1").unwrap_err();
-        assert!(err.contains("/v1/events/stop"), "got: {err}");
+        let err = remote.push_intervals(&config(), &[], false).unwrap_err();
+        assert!(err.contains("/v1/intervals"), "got: {err}");
     }
 
     fn state_body(minutes: f64) -> String {

@@ -40,6 +40,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/v1/events/prompt", post(routes::post_prompt))
         .route("/v1/events/stop", post(routes::post_stop))
         .route("/v1/events/session-end", post(routes::post_session_end))
+        .route("/v1/intervals", post(routes::post_intervals))
         .route("/v1/ignore", post(routes::post_ignore))
         .route("/v1/reset", post(routes::post_reset))
         .with_state(state)
