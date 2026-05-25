@@ -13,6 +13,35 @@
 //!    `GARLIC_SYNC=blocking`), hooks flush inline because the container may
 //!    vanish before any interactive command or cron runs.
 
+use crate::config::Config;
+use crate::paths::Paths;
+use crate::remote::{Remote, RemoteResponse};
+use crate::state::{save_state, State};
+
+/// Push this machine's closed intervals to the backend, returning the merged
+/// (cross-machine) state. Used by `status`, `sync`, and the synchronous hooks.
+///
+/// If a `reset` happened while the backend was unreachable (`reset_pending`),
+/// the backend is zeroed *before* the push — otherwise the union merge, which
+/// only replaces the sessions present in the push, would keep the stale
+/// pre-reset intervals and the shared total would never reflect the reset. The
+/// cleared flag is persisted so the reset reconciles exactly once; on failure
+/// it stays set and is retried on the next flush.
+pub fn flush(
+    remote: &Remote,
+    paths: &Paths,
+    config: &Config,
+    state: &mut State,
+    check_nudges: bool,
+) -> Result<RemoteResponse, String> {
+    if state.reset_pending {
+        remote.reset(config)?;
+        state.reset_pending = false;
+        let _ = save_state(paths, state);
+    }
+    remote.push_intervals(config, &state.intervals, check_nudges)
+}
+
 /// Whether hooks should flush synchronously inside the hook process.
 ///
 /// Default (unset) keeps hooks fully local so they never block on the network

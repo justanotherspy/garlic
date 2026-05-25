@@ -15,6 +15,7 @@ use crate::paths::{ClaudePaths, Paths};
 use crate::remote::Remote;
 use crate::setup::install_hooks;
 use crate::state::{load_state, load_state_for_date, save_state, State};
+use crate::sync::flush;
 use crate::version::{check_latest_version, CRATES_API_URL};
 
 const GARLIC: &str = "\u{1f9c4}";
@@ -116,9 +117,9 @@ pub fn cmd_status(
     // and read back the merged (shared) total in one round trip. If it's
     // unreachable, fall back to local state with a note — we always have data,
     // so an offline backend never blocks a status check.
-    let local = load_state(paths, config.reset_hour);
+    let mut local = load_state(paths, config.reset_hour);
     let state = match remote {
-        Some(r) => match r.push_intervals(&config, &local.intervals, false) {
+        Some(r) => match flush(r, paths, &config, &mut local, false) {
             Ok(resp) => resp.state,
             Err(e) => {
                 let _ = writeln!(
@@ -736,15 +737,22 @@ pub fn cmd_reset(
     // resurrect the total we just zeroed.
     state.intervals.clear();
     state.open.clear();
-    let _ = save_state(paths, &state);
+
+    // Zero the shared backend too. If it's unreachable, mark the reset pending
+    // so the next sync zeroes it before pushing — otherwise the stale pre-reset
+    // intervals would survive the union merge on the server.
+    let mut reset_synced = true;
     if let Some(r) = remote {
         if let Err(e) = r.reset(&config) {
+            reset_synced = false;
             let _ = writeln!(
                 err,
-                "garlic: shared backend unavailable ({e}); reset locally only"
+                "garlic: shared backend unavailable ({e}); reset locally, will sync on next run"
             );
         }
     }
+    state.reset_pending = !reset_synced;
+    let _ = save_state(paths, &state);
     let _ = writeln!(out, "garlic: timer reset for today");
     0
 }
@@ -767,8 +775,8 @@ pub fn cmd_sync(
         return 1;
     };
     let config = load_config(paths);
-    let state = load_state(paths, config.reset_hour);
-    match r.push_intervals(&config, &state.intervals, false) {
+    let mut state = load_state(paths, config.reset_hour);
+    match flush(r, paths, &config, &mut state, false) {
         Ok(resp) => {
             let _ = writeln!(
                 out,

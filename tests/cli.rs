@@ -445,6 +445,60 @@ fn offline_hook_prompt_still_tracks_locally() {
 }
 
 #[test]
+fn reset_offline_then_sync_reconciles_backend() {
+    // Reset while the backend is unreachable: local zeroes, reset is queued.
+    let tmp = seeded(State {
+        date: current_date(2),
+        accumulated_minutes: 95.0,
+        ..State::default()
+    });
+    let dir = gdir(&tmp);
+
+    garlic(&dir)
+        .env("GARLIC_URL", "http://127.0.0.1:1")
+        .env("GARLIC_TOKEN", "tok")
+        .args(["reset", "-y"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("timer reset"));
+
+    let state = garlic::state::load_state(&Paths::with_dir(&dir), 2);
+    assert_eq!(state.accumulated_minutes, 0.0);
+    assert!(
+        state.reset_pending,
+        "an offline reset should queue a backend reset"
+    );
+
+    // Backend reachable again: sync must zero it (/v1/reset) BEFORE pushing
+    // (/v1/intervals), so the stale pre-reset intervals can't survive the merge.
+    let server = MockServer::start();
+    let reset_mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/reset");
+        then.status(200).body(intervals_response(0.0, "[]", "null"));
+    });
+    let push_mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/intervals");
+        then.status(200).body(intervals_response(0.0, "[]", "null"));
+    });
+
+    garlic(&dir)
+        .env("GARLIC_URL", server.base_url())
+        .env("GARLIC_TOKEN", "tok")
+        .arg("sync")
+        .assert()
+        .success();
+    reset_mock.assert();
+    push_mock.assert();
+
+    // The pending flag is cleared so the reset reconciles exactly once.
+    let state = garlic::state::load_state(&Paths::with_dir(&dir), 2);
+    assert!(
+        !state.reset_pending,
+        "reset_pending should clear after a successful sync"
+    );
+}
+
+#[test]
 fn week_and_stats_run() {
     let tmp = seeded(State {
         date: current_date(2),

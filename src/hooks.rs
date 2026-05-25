@@ -16,7 +16,7 @@ use crate::nudges::{get_bedtime_nudge, get_nudge};
 use crate::paths::Paths;
 use crate::remote::Remote;
 use crate::state::{load_state, save_state, State};
-use crate::sync::hooks_block_on_sync;
+use crate::sync::{flush, hooks_block_on_sync};
 
 /// Build the nudge message (if any) for a prompt event from the inputs the
 /// local engine and the remote backend both produce: the highest threshold
@@ -82,14 +82,15 @@ fn degrade(debug: bool, event: &str, err: &str) {
 /// ephemeral/managed-host case); otherwise hooks stay local and never block.
 fn sync_if_blocking(
     remote: Option<&Remote>,
+    paths: &Paths,
     config: &Config,
-    state: &State,
+    state: &mut State,
     event: &str,
     debug: bool,
 ) {
     if let Some(r) = remote {
         if hooks_block_on_sync() {
-            if let Err(e) = r.push_intervals(config, &state.intervals, false) {
+            if let Err(e) = flush(r, paths, config, state, false) {
                 degrade(debug, event, &e);
             }
         }
@@ -116,15 +117,13 @@ pub fn hook_session_start(
     // The banner shows the shared total when we flush synchronously and the
     // backend is reachable, else the local total (identical on one machine).
     let accumulated = match remote {
-        Some(r) if hooks_block_on_sync() => {
-            match r.push_intervals(&config, &state.intervals, false) {
-                Ok(resp) => resp.state.accumulated_minutes,
-                Err(e) => {
-                    degrade(debug, "session-start", &e);
-                    state.accumulated_minutes
-                }
+        Some(r) if hooks_block_on_sync() => match flush(r, paths, &config, &mut state, false) {
+            Ok(resp) => resp.state.accumulated_minutes,
+            Err(e) => {
+                degrade(debug, "session-start", &e);
+                state.accumulated_minutes
             }
-        }
+        },
         _ => state.accumulated_minutes,
     };
     write_session_banner(out, accumulated)
@@ -156,25 +155,23 @@ pub fn hook_prompt(
     save_state(paths, &state)?;
 
     let (accumulated, ignored, crossed, bedtime) = match remote {
-        Some(r) if hooks_block_on_sync() => {
-            match r.push_intervals(&config, &state.intervals, true) {
-                Ok(resp) => (
-                    resp.state.accumulated_minutes,
-                    resp.state.ignored,
-                    resp.crossed_threshold,
-                    resp.bedtime,
-                ),
-                Err(e) => {
-                    degrade(debug, "prompt", &e);
-                    (
-                        state.accumulated_minutes,
-                        state.ignored,
-                        local_crossed,
-                        local_bedtime,
-                    )
-                }
+        Some(r) if hooks_block_on_sync() => match flush(r, paths, &config, &mut state, true) {
+            Ok(resp) => (
+                resp.state.accumulated_minutes,
+                resp.state.ignored,
+                resp.crossed_threshold,
+                resp.bedtime,
+            ),
+            Err(e) => {
+                degrade(debug, "prompt", &e);
+                (
+                    state.accumulated_minutes,
+                    state.ignored,
+                    local_crossed,
+                    local_bedtime,
+                )
             }
-        }
+        },
         _ => (
             state.accumulated_minutes,
             state.ignored,
@@ -201,7 +198,7 @@ pub fn hook_stop(
     let mut state = load_state(paths, config.reset_hour);
     handle_stop(&mut state, &config, session_id, now, debug);
     save_state(paths, &state)?;
-    sync_if_blocking(remote, &config, &state, "stop", debug);
+    sync_if_blocking(remote, paths, &config, &mut state, "stop", debug);
     Ok(())
 }
 
@@ -218,7 +215,7 @@ pub fn hook_session_end(
     let mut state = load_state(paths, config.reset_hour);
     handle_session_end(&mut state, &config, session_id, now, debug);
     save_state(paths, &state)?;
-    sync_if_blocking(remote, &config, &state, "session-end", debug);
+    sync_if_blocking(remote, paths, &config, &mut state, "session-end", debug);
     Ok(())
 }
 
