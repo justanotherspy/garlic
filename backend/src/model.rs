@@ -17,6 +17,32 @@ pub struct HistoryEntry {
     pub minutes: f64,
 }
 
+/// Whether an interval is agent generation time or user thinking time.
+/// Mirrors garlic's `intervals::Kind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Agent,
+    User,
+}
+
+/// A finished span of tracked time for one session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Interval {
+    pub session_id: String,
+    pub kind: Kind,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// An in-flight interval for a session not yet closed by its next event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenCursor {
+    pub session_id: String,
+    pub kind: Kind,
+    pub start: f64,
+}
+
 /// Per-user daily tracking state. Field names match garlic's `state.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct State {
@@ -27,6 +53,12 @@ pub struct State {
     pub ignored: bool,
     pub bedtime_nudge_given: bool,
     pub history: Vec<HistoryEntry>,
+    /// Closed intervals tracked today; absent in pre-interval payloads.
+    #[serde(default)]
+    pub intervals: Vec<Interval>,
+    /// In-flight cursors, one per session with an interval still open.
+    #[serde(default)]
+    pub open: Vec<OpenCursor>,
 }
 
 impl Default for State {
@@ -39,6 +71,8 @@ impl Default for State {
             ignored: false,
             bedtime_nudge_given: false,
             history: Vec::new(),
+            intervals: Vec::new(),
+            open: Vec::new(),
         }
     }
 }

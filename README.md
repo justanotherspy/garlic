@@ -22,6 +22,8 @@ From these events, garlic estimates how much time you have spent actively coding
 
 The time model counts your full engagement cycle: the time Claude spends generating a response (up to a configurable cap — 2 hours by default — to guard against hung processes or forgotten sessions inflating your daily total), plus the time you spend reading it and thinking before your next prompt. If your thinking time exceeds 40 minutes (configurable), garlic assumes you stepped away and counts nothing for that gap. Gaps within the limit are counted in full. The limit is intentionally generous: it covers the time you spend reading docs, answering a Slack message, checking email, or getting back into context — adjacent work that's still part of your coding session.
 
+Internally each cycle is tracked as **intervals** tagged by session: a UserPrompt→Stop span is **agent time** (the agent generating) and a Stop→UserPrompt span is **user time** (you reading, thinking, or typing). `garlic status` shows the split so you can see how an hour divides between agent work and your own planning/review. Your daily total is the **union** of these intervals across all sessions — so running two agents in parallel for an hour counts as one hour of engagement, not two. When sessions do overlap, garlic reports the concurrent time as a neutral fact (e.g. `12m with 2+ sessions running at once`); it is *never* weighted as "more productive," because babysitting multiple agents at once is more draining, not less — exactly the kind of overwork garlic is here to ward off.
+
 As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
 If you're still coding in the hour before the daily reset (1 AM by default, when `reset_hour` is 2), garlic sends a bedtime nudge — a distinct "wrap up and get some sleep" message that fires once per night.
@@ -101,7 +103,7 @@ Then re-run `garlic setup` to update your hooks if the release notes mention hoo
 # Check your installed version
 garlic version
 
-# See how long you have been Clauding today
+# See how long you have been Clauding today (with the agent/user split)
 garlic status
 
 # Output status as JSON (for scripting and statusline integrations)
@@ -111,10 +113,10 @@ garlic status --json
 garlic statusline
 
 # See your rolling 7-day usage summary
-garlic week
+garlic status --week
 
 # See monthly totals, streaks, and averages
-garlic stats
+garlic status --month
 
 # Disable nudging for the rest of the day (tracking continues)
 garlic ignore
@@ -131,9 +133,9 @@ garlic reset
 
 After running `garlic setup`, you can use `/garlic` directly in Claude Code without leaving the conversation. It supports all garlic subcommands:
 
-- `/garlic` or `/garlic status` — show today's accumulated time
-- `/garlic week` — show rolling 7-day summary
-- `/garlic stats` — show monthly totals and streaks
+- `/garlic` or `/garlic status` — show today's accumulated time (and the agent/user split)
+- `/garlic status --week` — show rolling 7-day summary
+- `/garlic status --month` — show monthly totals and streaks
 - `/garlic ignore` — disable nudging for the rest of the day
 
 ### Status line
@@ -191,8 +193,8 @@ self-hostable (it just needs a Redis connection string) and ships with a
 Dockerfile and `docker-compose.yml`. See [`backend/README.md`](backend/README.md)
 for the deployment guide and the complete REST API contract.
 
-When both variables are set, garlic's hooks and the `status`, `statusline`,
-`week`, `stats`, `ignore`, and `reset` commands operate on the shared backend
+When both variables are set, garlic's hooks and the `status` (including
+`--week`/`--month`), `statusline`, `ignore`, and `reset` commands operate on the shared backend
 instead of `~/.garlic/state.toml`. The backend owns *state*; your local
 `~/.garlic/config.toml` still drives time accounting and the nudge wording, and
 is sent with each request. The server clock is authoritative, so clients in
@@ -206,7 +208,8 @@ tracking that one event — while interactive commands report the error
 `garlic` is a Rust crate (`garlic-ward`) that builds a single binary named `garlic`. Source modules in `src/`:
 
 - `cli.rs` — CLI parsing (clap) and subcommand dispatch
-- `commands.rs` — implementations of `status`, `statusline`, `week`, `stats`, `set`, `reset`, `ignore`, `setup`, `version`
+- `commands.rs` — implementations of `status` (with `--week`/`--month` summaries), `statusline`, `set`, `reset`, `ignore`, `setup`, `version`
+- `intervals.rs` — interval types (agent/user spans tagged by session) and the sweep-line that derives daily totals, the agent/user split, and concurrency
 - `config.rs` — loads/creates `~/.garlic/config.toml` with defaults
 - `state.rs` — reads/writes `~/.garlic/state.toml` under an advisory file lock, handles daily reset
 - `engine.rs` — gap calculation, accumulation, threshold checking

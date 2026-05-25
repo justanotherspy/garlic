@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
+use garlic::intervals::{Kind, OpenCursor};
 use garlic::paths::Paths;
 use garlic::state::{current_date, save_state, State};
 use httpmock::prelude::*;
@@ -200,7 +201,13 @@ fn hook_prompt_accumulates_and_nudges() {
     let tmp = seeded(State {
         date: current_date(2),
         accumulated_minutes: 58.0,
-        last_event_time: unix_now() - 180.0, // ~3 min ago, within the gap cap
+        // An open thinking interval ~3 min old (within the gap cap) for the
+        // session the prompt below belongs to.
+        open: vec![OpenCursor {
+            session_id: "x".to_string(),
+            kind: Kind::User,
+            start: unix_now() - 180.0,
+        }],
         ..State::default()
     });
     garlic(&gdir(&tmp))
@@ -217,7 +224,12 @@ fn hook_prompt_below_threshold_is_silent() {
     let tmp = seeded(State {
         date: current_date(2),
         accumulated_minutes: 5.0,
-        last_event_time: unix_now() - 60.0,
+        // Empty stdin → session "default"; open a matching thinking cursor.
+        open: vec![OpenCursor {
+            session_id: "default".to_string(),
+            kind: Kind::User,
+            start: unix_now() - 60.0,
+        }],
         ..State::default()
     });
     garlic(&gdir(&tmp))
@@ -371,12 +383,12 @@ fn week_and_stats_run() {
     });
     let dir = gdir(&tmp);
     garlic(&dir)
-        .arg("week")
+        .args(["status", "--week"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Weekly usage"));
     garlic(&dir)
-        .arg("stats")
+        .args(["status", "--month"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Stats"));

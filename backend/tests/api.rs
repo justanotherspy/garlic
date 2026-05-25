@@ -203,7 +203,9 @@ async fn prompt_reports_bedtime_in_window() {
 async fn stop_clamps_generation_time() {
     let h = harness();
     post(&h.app, "/v1/events/session-start", json!({})).await;
-    // 150 minutes elapse; default max_generation_minutes is 120
+    // Prompt immediately (zero thinking gap), opening the agent interval.
+    post(&h.app, "/v1/events/prompt", json!({})).await;
+    // 150 minutes of generation elapse; default max_generation_minutes is 120.
     h.clock.advance_secs(150.0 * 60.0);
     let (status, body) = post(&h.app, "/v1/events/stop", json!({})).await;
     assert_eq!(status, StatusCode::OK);
@@ -212,6 +214,39 @@ async fn stop_clamps_generation_time() {
         (mins - 120.0).abs() < 0.01,
         "expected clamp to 120m, got {mins}"
     );
+}
+
+#[tokio::test]
+async fn parallel_sessions_union_not_sum() {
+    let h = harness();
+    // Two sessions under one token, generating over overlapping windows.
+    post(
+        &h.app,
+        "/v1/events/session-start",
+        json!({ "session_id": "a" }),
+    )
+    .await;
+    post(
+        &h.app,
+        "/v1/events/session-start",
+        json!({ "session_id": "b" }),
+    )
+    .await;
+    h.clock.advance_secs(60.0); // 1m thinking each
+    post(&h.app, "/v1/events/prompt", json!({ "session_id": "a" })).await;
+    post(&h.app, "/v1/events/prompt", json!({ "session_id": "b" })).await;
+    h.clock.set_unix(1_000.0 + 300.0);
+    post(&h.app, "/v1/events/stop", json!({ "session_id": "a" })).await; // agent a [60,300]
+    h.clock.set_unix(1_000.0 + 360.0);
+    let (status, body) = post(&h.app, "/v1/events/stop", json!({ "session_id": "b" })).await; // agent b [60,360]
+    assert_eq!(status, StatusCode::OK);
+    // Union wall-clock is 6m (0..360s), not the 11m a naive sum would give.
+    let mins = body["state"]["accumulated_minutes"].as_f64().unwrap();
+    assert!((mins - 6.0).abs() < 0.01, "expected union ~6m, got {mins}");
+    // Intervals are tracked per session.
+    let intervals = body["state"]["intervals"].as_array().unwrap();
+    assert!(intervals.iter().any(|i| i["session_id"] == "a"));
+    assert!(intervals.iter().any(|i| i["session_id"] == "b"));
 }
 
 #[tokio::test]

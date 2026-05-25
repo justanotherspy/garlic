@@ -7,9 +7,8 @@ use chrono::Local;
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::commands::{
-    cmd_ignore, cmd_ignore_remote, cmd_reset, cmd_reset_remote, cmd_set, cmd_setup, cmd_stats,
-    cmd_stats_remote, cmd_status, cmd_status_remote, cmd_statusline, cmd_statusline_remote,
-    cmd_version, cmd_week, cmd_week_remote, Confirm,
+    cmd_ignore, cmd_ignore_remote, cmd_reset, cmd_reset_remote, cmd_set, cmd_setup, cmd_status,
+    cmd_status_remote, cmd_statusline, cmd_statusline_remote, cmd_version, Confirm,
 };
 use crate::hooks::{
     hook_prompt, hook_prompt_remote, hook_session_end, hook_session_end_remote, hook_session_start,
@@ -45,18 +44,20 @@ enum Command {
         #[arg(long)]
         defaults: bool,
     },
-    /// Show accumulated active time today
+    /// Show accumulated active time today (or a weekly/monthly summary)
     Status {
         /// Emit status as a JSON object
         #[arg(long)]
         json: bool,
+        /// Show the rolling 7-day usage summary instead of today
+        #[arg(long, conflicts_with = "month")]
+        week: bool,
+        /// Show monthly totals, streaks, and averages instead of today
+        #[arg(long)]
+        month: bool,
     },
     /// Output a compact status line string for Claude Code
     Statusline,
-    /// Show rolling 7-day usage summary
-    Week,
-    /// Show monthly totals, streaks, and averages
-    Stats,
     /// Toggle nudging for the day
     Ignore,
     /// Update a config value (KEY=VALUE)
@@ -153,21 +154,20 @@ pub fn run() -> i32 {
                 &mut out,
             )
         }
-        Command::Status { json } => match &remote {
-            Some(r) => cmd_status_remote(r, &paths, json, &mut out, &mut err),
-            None => cmd_status(&paths, json, &mut out),
+        Command::Status { json, week, month } => match &remote {
+            Some(r) => cmd_status_remote(r, &paths, json, week, month, &mut out, &mut err),
+            None => cmd_status(
+                &paths,
+                json,
+                week,
+                month,
+                Local::now().naive_local(),
+                &mut out,
+            ),
         },
         Command::Statusline => match &remote {
             Some(r) => cmd_statusline_remote(r, &paths, &mut out),
             None => cmd_statusline(&paths, &mut out),
-        },
-        Command::Week => match &remote {
-            Some(r) => cmd_week_remote(r, &paths, &mut out, &mut err),
-            None => cmd_week(&paths, Local::now().naive_local(), &mut out),
-        },
-        Command::Stats => match &remote {
-            Some(r) => cmd_stats_remote(r, &paths, &mut out, &mut err),
-            None => cmd_stats(&paths, Local::now().naive_local(), &mut out),
         },
         Command::Ignore => match &remote {
             Some(r) => cmd_ignore_remote(r, &paths, &mut out, &mut err),
@@ -191,27 +191,49 @@ fn run_hook(
     debug: bool,
     out: &mut dyn Write,
 ) -> i32 {
-    // Consume the JSON Claude Code writes to stdin (the content is unused).
+    // Claude Code writes a JSON object to stdin; we use its `session_id` to
+    // attribute intervals to the session that produced the event.
     let mut buf = String::new();
     let _ = io::stdin().read_to_string(&mut buf);
+    let session_id = parse_session_id(&buf);
 
     let now = unix_now();
     let result = match (event, remote) {
-        (HookEvent::SessionStart, Some(r)) => hook_session_start_remote(r, paths, debug, out),
-        (HookEvent::SessionStart, None) => hook_session_start(paths, now, debug, out),
-        (HookEvent::Prompt, Some(r)) => hook_prompt_remote(r, paths, debug, out),
-        (HookEvent::Prompt, None) => {
-            hook_prompt(paths, now, Local::now().naive_local(), debug, out)
+        (HookEvent::SessionStart, Some(r)) => {
+            hook_session_start_remote(r, paths, &session_id, debug, out)
         }
-        (HookEvent::Stop, Some(r)) => hook_stop_remote(r, paths, debug),
-        (HookEvent::Stop, None) => hook_stop(paths, now, debug),
-        (HookEvent::SessionEnd, Some(r)) => hook_session_end_remote(r, paths, debug),
-        (HookEvent::SessionEnd, None) => hook_session_end(paths, now, debug),
+        (HookEvent::SessionStart, None) => hook_session_start(paths, &session_id, now, debug, out),
+        (HookEvent::Prompt, Some(r)) => hook_prompt_remote(r, paths, &session_id, debug, out),
+        (HookEvent::Prompt, None) => hook_prompt(
+            paths,
+            &session_id,
+            now,
+            Local::now().naive_local(),
+            debug,
+            out,
+        ),
+        (HookEvent::Stop, Some(r)) => hook_stop_remote(r, paths, &session_id, debug),
+        (HookEvent::Stop, None) => hook_stop(paths, &session_id, now, debug),
+        (HookEvent::SessionEnd, Some(r)) => hook_session_end_remote(r, paths, &session_id, debug),
+        (HookEvent::SessionEnd, None) => hook_session_end(paths, &session_id, now, debug),
     };
     match result {
         Ok(()) => 0,
         Err(_) => 1,
     }
+}
+
+/// Extract `session_id` from the hook's stdin JSON, falling back to `"default"`
+/// when it's missing or the payload isn't valid JSON (e.g. manual invocation).
+fn parse_session_id(stdin: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(stdin)
+        .ok()
+        .as_ref()
+        .and_then(|v| v.get("session_id"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("default")
+        .to_string()
 }
 
 #[cfg(test)]
