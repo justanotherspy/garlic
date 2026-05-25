@@ -49,6 +49,15 @@ Or, without a Rust toolchain, grab a prebuilt binary with [cargo-binstall](https
 cargo binstall garlic-ward
 ```
 
+On macOS you can install the prebuilt binary with [Homebrew](https://brew.sh) from this repo's tap:
+
+```bash
+brew tap justanotherspy/garlic https://github.com/justanotherspy/garlic
+brew install --cask garlic
+```
+
+Upgrade later with `brew upgrade --cask garlic`. (Casks are macOS-only; on Linux/WSL use `cargo install`, `cargo binstall`, or a prebuilt binary.)
+
 You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
 
 Run setup to install the Claude Code hooks:
