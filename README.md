@@ -73,6 +73,18 @@ garlic setup --defaults
 
 Setup is idempotent — safe to run again if you need to repair or update hooks.
 
+## Migrating from the Python version
+
+Earlier releases of garlic shipped as a Python package (`garlic-cli`) installed with [uv](https://github.com/astral-sh/uv). The current release is a self-contained Rust binary (`garlic-ward`) with no Python runtime required. To migrate, first uninstall the old Python tool, then install the Rust version and re-run setup:
+
+```bash
+uv tool uninstall garlic-cli
+cargo install garlic-ward   # or: cargo binstall garlic-ward
+garlic setup
+```
+
+Your existing `~/.garlic/` config and tracking state are preserved, so you keep your settings and daily totals across the switch. Re-running `garlic setup` refreshes the hooks in `~/.claude/settings.json` to point at the new binary.
+
 ## Upgrading
 
 ```bash
