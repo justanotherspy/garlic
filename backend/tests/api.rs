@@ -250,6 +250,107 @@ async fn parallel_sessions_union_not_sum() {
 }
 
 #[tokio::test]
+async fn intervals_merge_unions_across_clients() {
+    let h = harness();
+    // Client A pushes one 5-minute agent span for session "a".
+    let (status, body) = post(
+        &h.app,
+        "/v1/intervals",
+        json!({
+            "intervals": [
+                { "session_id": "a", "kind": "agent", "start": 1000.0, "end": 1300.0 }
+            ]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!((body["state"]["accumulated_minutes"].as_f64().unwrap() - 5.0).abs() < 0.01);
+    assert!(body["crossed_threshold"].is_null());
+
+    // Client B (a different machine, different session) pushes an overlapping
+    // span. The union is what matters, not the sum.
+    let (_, body) = post(
+        &h.app,
+        "/v1/intervals",
+        json!({
+            "intervals": [
+                { "session_id": "b", "kind": "agent", "start": 1180.0, "end": 1480.0 }
+            ]
+        }),
+    )
+    .await;
+    // Union [1000,1480] = 480s = 8m (a sum would be 10m).
+    let mins = body["state"]["accumulated_minutes"].as_f64().unwrap();
+    assert!((mins - 8.0).abs() < 0.01, "expected union ~8m, got {mins}");
+
+    // A re-push from client A (its full, unchanged set) is idempotent: B's
+    // contribution is preserved, the total is unchanged.
+    let (_, body) = post(
+        &h.app,
+        "/v1/intervals",
+        json!({
+            "intervals": [
+                { "session_id": "a", "kind": "agent", "start": 1000.0, "end": 1300.0 }
+            ]
+        }),
+    )
+    .await;
+    let mins = body["state"]["accumulated_minutes"].as_f64().unwrap();
+    assert!(
+        (mins - 8.0).abs() < 0.01,
+        "re-push should be idempotent, got {mins}"
+    );
+    let sessions: Vec<&str> = body["state"]["intervals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["session_id"].as_str().unwrap())
+        .collect();
+    assert!(sessions.contains(&"a") && sessions.contains(&"b"));
+}
+
+#[tokio::test]
+async fn intervals_check_nudges_reports_threshold() {
+    let h = harness();
+    // A single 2-minute span with a 1-minute threshold and check_nudges set.
+    let (status, body) = post(
+        &h.app,
+        "/v1/intervals",
+        json!({
+            "nudge_thresholds_minutes": [1, 2],
+            "intervals": [
+                { "session_id": "a", "kind": "agent", "start": 1000.0, "end": 1120.0 }
+            ],
+            "check_nudges": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["crossed_threshold"], 2);
+    assert_eq!(body["state"]["nudges_given"], json!([2]));
+}
+
+#[tokio::test]
+async fn intervals_plain_sync_leaves_nudges_untouched() {
+    let h = harness();
+    // Same crossing, but without check_nudges: total updates, no nudge fires.
+    let (_, body) = post(
+        &h.app,
+        "/v1/intervals",
+        json!({
+            "nudge_thresholds_minutes": [1, 2],
+            "intervals": [
+                { "session_id": "a", "kind": "agent", "start": 1000.0, "end": 1120.0 }
+            ]
+        }),
+    )
+    .await;
+    assert!((body["state"]["accumulated_minutes"].as_f64().unwrap() - 2.0).abs() < 0.01);
+    assert!(body["crossed_threshold"].is_null());
+    assert_eq!(body["state"]["nudges_given"], json!([]));
+}
+
+#[tokio::test]
 async fn ignore_toggles_then_sets() {
     let h = harness();
     let (_, body) = post(&h.app, "/v1/ignore", json!({})).await;

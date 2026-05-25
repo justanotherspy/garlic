@@ -6,6 +6,8 @@
 //! read-modify-write critical section. Time is read through the `Clock` trait
 //! so the server clock is the single source of truth across all clients.
 
+use std::collections::HashSet;
+
 use chrono::{Duration, Timelike};
 
 use crate::model::{HistoryEntry, Interval, Kind, OpenCursor, State, TimeConfig, HISTORY_MAX};
@@ -316,6 +318,53 @@ pub fn reset_daily(state: &mut State) {
 pub fn set_ignored(state: &mut State, value: Option<bool>) -> bool {
     state.ignored = value.unwrap_or(!state.ignored);
     state.ignored
+}
+
+/// Merge a client's closed intervals into the stored set.
+///
+/// This is the heart of the local-first sync path: clients account time locally
+/// (offline-tolerant) and push their day's closed intervals here. Intervals are
+/// absolute Unix spans, so the merge is the same union the single-machine engine
+/// already does — two machines are just more sessions to union.
+///
+/// To stay idempotent under re-pushes (a client always sends its *full* day),
+/// any stored interval whose `session_id` appears in the incoming set is
+/// replaced; intervals from other sessions (i.e. other machines) are kept. The
+/// daily total is then recomputed as the union across everything stored.
+///
+/// When `check_nudges` is set (a prompt event in synchronous mode) the highest
+/// newly-crossed threshold and the bedtime window are evaluated against the
+/// merged total; a plain sync leaves nudge bookkeeping untouched.
+pub fn merge_intervals(
+    state: &mut State,
+    config: &TimeConfig,
+    incoming: Vec<Interval>,
+    check_nudges: bool,
+    clock: &dyn Clock,
+) -> (Option<i64>, bool) {
+    if !incoming.is_empty() {
+        let sessions: HashSet<&str> = incoming.iter().map(|i| i.session_id.as_str()).collect();
+        state
+            .intervals
+            .retain(|i| !sessions.contains(i.session_id.as_str()));
+        for iv in incoming {
+            push_interval(&mut state.intervals, iv);
+        }
+    }
+    recompute_total(state);
+
+    if !check_nudges {
+        return (None, false);
+    }
+    let crossed = check_thresholds(state, config);
+    // Mirror apply_prompt: only consider bedtime when no threshold fired and
+    // nudging isn't paused (check_bedtime has a once-per-night side effect).
+    let bedtime = if crossed.is_none() && !state.ignored {
+        check_bedtime(state, config, clock)
+    } else {
+        false
+    };
+    (crossed, bedtime)
 }
 
 #[cfg(test)]

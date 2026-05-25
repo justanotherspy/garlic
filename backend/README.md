@@ -20,11 +20,20 @@ governs time accounting stays with the client and is sent on each request. This
 mirrors garlic's existing `engine(state, config)` split exactly — the engine
 logic (gap accounting, thresholds, daily rollover, bedtime) is ported
 faithfully from the Python `engine.py`/`state.py` into Rust. The **server clock
-is authoritative**: it timestamps every event and computes the day boundary in
-its own timezone (`TZ`), so clients in different timezones still share one
-consistent "day" and can't drift via clock skew. Each request's read-modify-write
-runs under a **per-namespace Redis lock**, so concurrent agents never race on
-the accumulated total — safe even across multiple backend replicas.
+is authoritative** for the day boundary: it computes the rollover in its own
+timezone (`TZ`), so clients in different timezones still share one consistent
+"day". Each request's read-modify-write runs under a **per-namespace Redis
+lock**, so concurrent agents never race on the accumulated total — safe even
+across multiple backend replicas.
+
+The CLI is **local-first**: it accounts time offline into its own `state.toml`
+and pushes the day's closed intervals to `POST /v1/intervals`, where the backend
+**merges them by union** with what other machines have pushed. Because intervals
+are absolute Unix spans, the merge is idempotent (a client re-pushes its full
+day) and timezone-independent (overlapping wall-clock from two machines counts
+once). The legacy `/v1/events/*` endpoints — where the server clock timestamps
+each event — remain for direct API use, but the CLI now syncs via the merge
+endpoint.
 
 ## Quick start (Docker)
 
@@ -99,8 +108,10 @@ Mutating endpoints accept an optional JSON **config** body. Any omitted field
 falls back to garlic's default, so `{}` (or no body at all) is valid. The four
 `/v1/events/*` endpoints additionally accept a `session_id` so the backend can
 attribute intervals to the session that produced the event (it defaults to
-`"default"` when omitted). The server stamps every interval boundary with its
-own clock — clients never send timestamps.
+`"default"` when omitted). For the event endpoints the server stamps every
+interval boundary with its own clock; the local-first `POST /v1/intervals`
+endpoint instead accepts the client's already-closed interval spans and merges
+them by union (see below).
 
 ```json
 {
@@ -119,8 +130,32 @@ own clock — clients never send timestamps.
 | `POST` | `/v1/events/prompt`          | config + session  | Close user / open agent interval; report crossed threshold + bedtime. |
 | `POST` | `/v1/events/stop`            | config + session  | Close agent interval (clamped to `max_generation_minutes`) / open user. |
 | `POST` | `/v1/events/session-end`     | config + session  | Finalize the session's in-flight interval and drop its cursor.     |
+| `POST` | `/v1/intervals`              | config + `intervals` + `check_nudges?` | Merge a client's locally-accounted closed intervals into the shared total (local-first sync). |
 | `POST` | `/v1/ignore`                 | config + `set?`   | Toggle (or set, via `"set": true/false`) the daily nudge pause.    |
 | `POST` | `/v1/reset`                  | config            | Zero today's timer (history preserved).                            |
+
+#### `POST /v1/intervals` (local-first sync)
+
+The body is the client's config plus its day of closed intervals:
+
+```json
+{
+  "nudge_thresholds_minutes": [30, 60, 90, 120],
+  "intervals": [
+    { "session_id": "abc123", "kind": "user", "start": 1779495000.0, "end": 1779495180.0 },
+    { "session_id": "abc123", "kind": "agent", "start": 1779495180.0, "end": 1779495417.55 }
+  ],
+  "check_nudges": false
+}
+```
+
+The backend replaces any stored intervals whose `session_id` appears in the
+payload (so a client can re-push its full day idempotently), keeps intervals
+from other sessions/machines, and recomputes the daily total as the union across
+everything. Set `check_nudges: true` (a prompt event in synchronous mode) to
+have the backend evaluate nudge thresholds and the bedtime window against the
+merged total and return `crossed_threshold`/`bedtime`; a plain sync leaves
+`check_nudges` `false` and nudge bookkeeping untouched.
 
 Every state endpoint returns the same envelope. `accumulated_minutes` is the
 **union** of all intervals' wall-clock (concurrent sessions are not

@@ -39,6 +39,11 @@ pub struct State {
     /// In-flight cursors, one per session with an interval still open.
     #[serde(default)]
     pub open: Vec<OpenCursor>,
+    /// Set when a `reset` happened while the backend was unreachable. The next
+    /// sync zeroes the backend before pushing, so the shared total reflects the
+    /// reset rather than resurrecting the pre-reset intervals.
+    #[serde(default)]
+    pub reset_pending: bool,
 }
 
 impl State {
@@ -326,6 +331,7 @@ mod tests {
                 kind: Kind::User,
                 start: 1710567890.123,
             }],
+            reset_pending: true,
         };
         save_state(&paths, &state).unwrap();
         let loaded = load_state_for_date(&paths, "2026-03-16");

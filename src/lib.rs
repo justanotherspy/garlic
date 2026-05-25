@@ -12,4 +12,5 @@ pub mod paths;
 pub mod remote;
 pub mod setup;
 pub mod state;
+pub mod sync;
 pub mod version;

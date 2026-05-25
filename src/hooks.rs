@@ -15,7 +15,8 @@ use crate::format::format_duration;
 use crate::nudges::{get_bedtime_nudge, get_nudge};
 use crate::paths::Paths;
 use crate::remote::Remote;
-use crate::state::{load_state, save_state};
+use crate::state::{load_state, save_state, State};
+use crate::sync::{flush, hooks_block_on_sync};
 
 /// Build the nudge message (if any) for a prompt event from the inputs the
 /// local engine and the remote backend both produce: the highest threshold
@@ -68,9 +69,38 @@ fn write_session_banner(out: &mut (impl Write + ?Sized), accumulated: f64) -> io
     Ok(())
 }
 
-/// Handle SessionStart hook: record start timestamp and show status.
+/// Log a backend failure to stderr in debug mode; never propagates. A backend
+/// error must never break a session, so synchronous-flush failures are silent.
+fn degrade(debug: bool, event: &str, err: &str) {
+    if debug {
+        eprintln!("[garlic debug] {event}: backend unavailable: {err}");
+    }
+}
+
+/// Best-effort synchronous flush for hooks that produce no user-facing output.
+/// Only runs when a backend is configured *and* `GARLIC_SYNC=blocking` (the
+/// ephemeral/managed-host case); otherwise hooks stay local and never block.
+fn sync_if_blocking(
+    remote: Option<&Remote>,
+    paths: &Paths,
+    config: &Config,
+    state: &mut State,
+    event: &str,
+    debug: bool,
+) {
+    if let Some(r) = remote {
+        if hooks_block_on_sync() {
+            if let Err(e) = flush(r, paths, config, state, false) {
+                degrade(debug, event, &e);
+            }
+        }
+    }
+}
+
+/// Handle SessionStart hook: record start timestamp, optionally sync, show status.
 pub fn hook_session_start(
     paths: &Paths,
+    remote: Option<&Remote>,
     session_id: &str,
     now: f64,
     debug: bool,
@@ -83,12 +113,31 @@ pub fn hook_session_start(
     }
     handle_session_start(&mut state, session_id, now);
     save_state(paths, &state)?;
-    write_session_banner(out, state.accumulated_minutes)
+
+    // The banner shows the shared total when we flush synchronously and the
+    // backend is reachable, else the local total (identical on one machine).
+    let accumulated = match remote {
+        Some(r) if hooks_block_on_sync() => match flush(r, paths, &config, &mut state, false) {
+            Ok(resp) => resp.state.accumulated_minutes,
+            Err(e) => {
+                degrade(debug, "session-start", &e);
+                state.accumulated_minutes
+            }
+        },
+        _ => state.accumulated_minutes,
+    };
+    write_session_banner(out, accumulated)
 }
 
-/// Handle UserPromptSubmit hook: accumulate time, maybe nudge.
+/// Handle UserPromptSubmit hook: accumulate time locally, maybe nudge.
+///
+/// Time is always accounted into the local `state.toml` first, so tracking
+/// survives an unreachable backend. In synchronous mode the merged (shared)
+/// total drives the nudge — so a threshold fires once across machines — while
+/// the default keeps the hook fully local and off the network.
 pub fn hook_prompt(
     paths: &Paths,
+    remote: Option<&Remote>,
     session_id: &str,
     now: f64,
     now_local: NaiveDateTime,
@@ -97,126 +146,76 @@ pub fn hook_prompt(
 ) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
-    let crossed = handle_prompt(&mut state, &config, session_id, now, debug);
+    let local_crossed = handle_prompt(&mut state, &config, session_id, now, debug);
 
     // Only consider the bedtime window when no threshold fired and nudging
     // isn't paused — check_bedtime sets a once-per-night flag as a side effect.
-    let bedtime =
-        crossed.is_none() && !state.ignored && check_bedtime(&mut state, &config, now_local);
-    let nudge = nudge_for(
-        &config,
-        state.accumulated_minutes,
-        state.ignored,
-        crossed,
-        bedtime,
-    );
-
+    let local_bedtime =
+        local_crossed.is_none() && !state.ignored && check_bedtime(&mut state, &config, now_local);
     save_state(paths, &state)?;
 
-    if let Some(nudge) = nudge {
+    let (accumulated, ignored, crossed, bedtime) = match remote {
+        Some(r) if hooks_block_on_sync() => match flush(r, paths, &config, &mut state, true) {
+            Ok(resp) => (
+                resp.state.accumulated_minutes,
+                resp.state.ignored,
+                resp.crossed_threshold,
+                resp.bedtime,
+            ),
+            Err(e) => {
+                degrade(debug, "prompt", &e);
+                (
+                    state.accumulated_minutes,
+                    state.ignored,
+                    local_crossed,
+                    local_bedtime,
+                )
+            }
+        },
+        _ => (
+            state.accumulated_minutes,
+            state.ignored,
+            local_crossed,
+            local_bedtime,
+        ),
+    };
+
+    if let Some(nudge) = nudge_for(&config, accumulated, ignored, crossed, bedtime) {
         write_nudge(out, &nudge)?;
     }
     Ok(())
 }
 
 /// Handle Stop hook: close the agent interval and open a user interval.
-pub fn hook_stop(paths: &Paths, session_id: &str, now: f64, debug: bool) -> io::Result<()> {
+pub fn hook_stop(
+    paths: &Paths,
+    remote: Option<&Remote>,
+    session_id: &str,
+    now: f64,
+    debug: bool,
+) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
     handle_stop(&mut state, &config, session_id, now, debug);
-    save_state(paths, &state)
+    save_state(paths, &state)?;
+    sync_if_blocking(remote, paths, &config, &mut state, "stop", debug);
+    Ok(())
 }
 
 /// Handle SessionEnd hook: finalize the session's in-flight interval and drop
 /// its cursor.
-pub fn hook_session_end(paths: &Paths, session_id: &str, now: f64, debug: bool) -> io::Result<()> {
+pub fn hook_session_end(
+    paths: &Paths,
+    remote: Option<&Remote>,
+    session_id: &str,
+    now: f64,
+    debug: bool,
+) -> io::Result<()> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
     handle_session_end(&mut state, &config, session_id, now, debug);
-    save_state(paths, &state)
-}
-
-// --- Remote (shared-state backend) hook handlers ---------------------------
-//
-// When a backend is configured the server clock is authoritative, so these
-// don't pass `now`. A backend error must never break a session: each handler
-// degrades to a silent no-op (logging only under `--debug`).
-
-/// Log a backend failure to stderr in debug mode; never propagates.
-fn degrade(debug: bool, event: &str, err: &str) {
-    if debug {
-        eprintln!("[garlic debug] {event}: backend unavailable: {err}");
-    }
-}
-
-pub fn hook_session_start_remote(
-    remote: &Remote,
-    paths: &Paths,
-    session_id: &str,
-    debug: bool,
-    out: &mut (impl Write + ?Sized),
-) -> io::Result<()> {
-    let config = load_config(paths);
-    match remote.session_start(&config, session_id) {
-        Ok(resp) => write_session_banner(out, resp.state.accumulated_minutes),
-        Err(e) => {
-            degrade(debug, "session-start", &e);
-            Ok(())
-        }
-    }
-}
-
-pub fn hook_prompt_remote(
-    remote: &Remote,
-    paths: &Paths,
-    session_id: &str,
-    debug: bool,
-    out: &mut (impl Write + ?Sized),
-) -> io::Result<()> {
-    let config = load_config(paths);
-    match remote.prompt(&config, session_id) {
-        Ok(resp) => {
-            if let Some(nudge) = nudge_for(
-                &config,
-                resp.state.accumulated_minutes,
-                resp.state.ignored,
-                resp.crossed_threshold,
-                resp.bedtime,
-            ) {
-                write_nudge(out, &nudge)?;
-            }
-            Ok(())
-        }
-        Err(e) => {
-            degrade(debug, "prompt", &e);
-            Ok(())
-        }
-    }
-}
-
-pub fn hook_stop_remote(
-    remote: &Remote,
-    paths: &Paths,
-    session_id: &str,
-    debug: bool,
-) -> io::Result<()> {
-    let config = load_config(paths);
-    if let Err(e) = remote.stop(&config, session_id) {
-        degrade(debug, "stop", &e);
-    }
-    Ok(())
-}
-
-pub fn hook_session_end_remote(
-    remote: &Remote,
-    paths: &Paths,
-    session_id: &str,
-    debug: bool,
-) -> io::Result<()> {
-    let config = load_config(paths);
-    if let Err(e) = remote.session_end(&config, session_id) {
-        degrade(debug, "session-end", &e);
-    }
+    save_state(paths, &state)?;
+    sync_if_blocking(remote, paths, &config, &mut state, "session-end", debug);
     Ok(())
 }
 
@@ -282,7 +281,7 @@ mod tests {
     fn session_start_opens_user_cursor() {
         let (_tmp, paths) = setup(&base_state());
         let mut out = Vec::new();
-        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, None, "s", NOW, false, &mut out).unwrap();
         let state = load_state(&paths, 2);
         assert_eq!(state.open.len(), 1);
         assert_eq!(state.open[0].session_id, "s");
@@ -295,7 +294,7 @@ mod tests {
         s.accumulated_minutes = 95.0;
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, None, "s", NOW, false, &mut out).unwrap();
         assert!(String::from_utf8(out).unwrap().contains("1h 35m"));
     }
 
@@ -303,7 +302,7 @@ mod tests {
     fn session_start_silent_when_no_time() {
         let (_tmp, paths) = setup(&base_state());
         let mut out = Vec::new();
-        hook_session_start(&paths, "s", NOW, false, &mut out).unwrap();
+        hook_session_start(&paths, None, "s", NOW, false, &mut out).unwrap();
         assert!(out.is_empty());
     }
 
@@ -312,7 +311,7 @@ mod tests {
         // 30m already tracked, an agent interval running for 2m.
         let s = with_cursor(30.0, "x", Kind::Agent, NOW - 120.0);
         let (_tmp, paths) = setup(&s);
-        hook_stop(&paths, "x", NOW, false).unwrap();
+        hook_stop(&paths, None, "x", NOW, false).unwrap();
         let state = load_state(&paths, 2);
         assert!((state.accumulated_minutes - 32.0).abs() < 0.01);
         // A user-thinking cursor is now open for the same session.
@@ -326,7 +325,7 @@ mod tests {
     fn session_end_finalizes_and_drops_cursor() {
         let s = with_cursor(30.0, "x", Kind::Agent, NOW - 120.0);
         let (_tmp, paths) = setup(&s);
-        hook_session_end(&paths, "x", NOW, false).unwrap();
+        hook_session_end(&paths, None, "x", NOW, false).unwrap();
         let state = load_state(&paths, 2);
         assert!((state.accumulated_minutes - 32.0).abs() < 0.01);
         assert!(state.open.iter().all(|c| c.session_id != "x"));
@@ -337,7 +336,7 @@ mod tests {
         let s = with_cursor(0.0, "x", Kind::User, NOW - 300.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, None, "x", NOW, local(10, 0), false, &mut out).unwrap();
         assert!(out.is_empty());
         let state = load_state(&paths, 2);
         assert!(state.accumulated_minutes > 0.0);
@@ -349,7 +348,7 @@ mod tests {
         let s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, None, "x", NOW, local(10, 0), false, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         let response: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(
@@ -370,7 +369,7 @@ mod tests {
         s.ignored = true;
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, "x", NOW, local(10, 0), false, &mut out).unwrap();
+        hook_prompt(&paths, None, "x", NOW, local(10, 0), false, &mut out).unwrap();
         assert!(out.is_empty());
     }
 
@@ -379,7 +378,7 @@ mod tests {
         let s = with_cursor(45.0, "x", Kind::User, NOW - 60.0);
         let (_tmp, paths) = setup(&s);
         let mut out = Vec::new();
-        hook_prompt(&paths, "x", NOW, local(1, 30), false, &mut out).unwrap();
+        hook_prompt(&paths, None, "x", NOW, local(1, 30), false, &mut out).unwrap();
         let text = String::from_utf8(out).unwrap();
         let response: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(

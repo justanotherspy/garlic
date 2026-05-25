@@ -16,7 +16,7 @@ use serde_json::json;
 use crate::auth::authenticate;
 use crate::engine;
 use crate::error::AppError;
-use crate::model::{State as GarlicState, TimeConfig};
+use crate::model::{Interval, State as GarlicState, TimeConfig};
 use crate::AppState;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -63,6 +63,20 @@ pub struct EventRequest {
     pub session_id: Option<String>,
 }
 
+/// Body for `POST /v1/intervals`: the client's [`TimeConfig`] plus the closed
+/// intervals it has accounted locally. `check_nudges` asks the backend to
+/// evaluate nudge thresholds / bedtime against the merged total (set by a
+/// prompt event in synchronous mode); a plain sync leaves it `false`.
+#[derive(Debug, Default, Deserialize)]
+pub struct IntervalsRequest {
+    #[serde(flatten)]
+    pub config: TimeConfig,
+    #[serde(default)]
+    pub intervals: Vec<Interval>,
+    #[serde(default)]
+    pub check_nudges: bool,
+}
+
 fn parse_config(body: &Bytes) -> Result<TimeConfig, AppError> {
     if body.is_empty() {
         return Ok(TimeConfig::default());
@@ -82,6 +96,14 @@ fn parse_event(body: &Bytes) -> Result<EventRequest, AppError> {
 fn parse_ignore(body: &Bytes) -> Result<IgnoreRequest, AppError> {
     if body.is_empty() {
         return Ok(IgnoreRequest::default());
+    }
+    serde_json::from_slice(body)
+        .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))
+}
+
+fn parse_intervals(body: &Bytes) -> Result<IntervalsRequest, AppError> {
+    if body.is_empty() {
+        return Ok(IntervalsRequest::default());
     }
     serde_json::from_slice(body)
         .map_err(|e| AppError::BadRequest(format!("invalid JSON body: {e}")))
@@ -229,6 +251,36 @@ pub async fn post_session_end(
         })
         .await?;
     Ok(Json(StateResponse::plain(state)))
+}
+
+/// `POST /v1/intervals` — merge a client's locally-accounted intervals into the
+/// shared total. This is the local-first sync path: offline-tolerant clients
+/// push their day's closed intervals here and the backend unions them across
+/// machines. `check_nudges` (a prompt in synchronous mode) reports the crossed
+/// threshold + bedtime against the merged total.
+pub async fn post_intervals(
+    State(app): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<StateResponse>, AppError> {
+    let ns = authenticate(&headers, &app.config)?;
+    let req = parse_intervals(&body)?;
+    let config = req.config;
+    let intervals = req.intervals;
+    let check_nudges = req.check_nudges;
+    let clock = app.clock.clone();
+    let (state, (crossed, bedtime)) = app
+        .store
+        .mutate(&ns, move |s| {
+            engine::apply_rollover(s, config.reset_hour, clock.as_ref());
+            engine::merge_intervals(s, &config, intervals, check_nudges, clock.as_ref())
+        })
+        .await?;
+    Ok(Json(StateResponse {
+        state,
+        crossed_threshold: crossed,
+        bedtime,
+    }))
 }
 
 /// `POST /v1/ignore` — toggle (or set) the daily nudge-pause flag.

@@ -127,6 +127,9 @@ garlic set max_prompt_gap_minutes=60
 
 # Reset the daily timer to zero
 garlic reset
+
+# Push locally-tracked time to the shared backend (for cron/manual sync)
+garlic sync
 ```
 
 ### Slash command
@@ -177,38 +180,73 @@ nudge_style = "gentle"
 
 ## Shared state backend (self-hosted)
 
-By default garlic tracks time in a local `~/.garlic/state.toml`. If you run
-Claude Code across several machines or ephemeral cloud environments and want
-**one shared daily total**, you can self-host the garlic backend — a small Rust
-HTTP service backed by Redis — and point every client at it:
+By default garlic tracks time in a local `~/.garlic/state.toml` and never talks
+to the network. If you run Claude Code across several machines or ephemeral
+cloud environments and want **one shared daily total**, you can self-host the
+garlic backend — a small Rust HTTP service backed by Redis — and point every
+client at it:
 
 ```bash
 export GARLIC_URL="https://garlic.example.com"
 export GARLIC_TOKEN="<a token configured on your backend>"
 ```
 
-Every agent using the same `GARLIC_TOKEN` shares one set of totals; local state
-remains the default when these variables are unset. The service is fully
-self-hostable (it just needs a Redis connection string) and ships with a
-Dockerfile and `docker-compose.yml`. See [`backend/README.md`](backend/README.md)
-for the deployment guide and the complete REST API contract.
+Every client using the same `GARLIC_TOKEN` shares one set of totals. The
+service is fully self-hostable (it just needs a Redis connection string) and
+ships with a Dockerfile and `docker-compose.yml`. See
+[`backend/README.md`](backend/README.md) for the deployment guide and the
+complete REST API contract.
 
-When both variables are set, garlic's hooks and the `status` (including
-`--week`/`--month`), `statusline`, `ignore`, and `reset` commands operate on the shared backend
-instead of `~/.garlic/state.toml`. The backend owns *state*; your local
-`~/.garlic/config.toml` still drives time accounting and the nudge wording, and
-is sent with each request. The server clock is authoritative, so clients in
-different timezones share one consistent "day". If the backend is unreachable,
-hooks fail open — they never block a Claude Code session, they just skip
-tracking that one event — while interactive commands report the error
-(`statusline` shows a muted `🧄 --`).
+### Local-first, sync later
+
+garlic is **local-first**, even with a backend configured: hooks always account
+time into `~/.garlic/state.toml` and **never block on the network**. Tracking
+keeps working when the host is offline or the backend is unreachable — nothing
+is lost, it's just synced later. The day's closed intervals (absolute time
+spans) are the unit of sync, and the backend **merges** each client's intervals
+by union — so two machines are just more sessions to union into one total, never
+double-counted.
+
+Who pushes that local outbox to the backend is decoupled from the hooks:
+
+- **`garlic status`** flushes on the way through, then shows the merged
+  (cross-machine) total. If the backend is unreachable it falls back to your
+  local total and notes it — it never errors out.
+- **`garlic sync`** is an explicit drain. On a laptop, schedule it with cron (or
+  launchd) so a **separate process — outside any network-restricted agent
+  sandbox — periodically reconciles totals** without ever slowing a hook:
+
+  ```bash
+  # crontab -e — sync every 5 minutes
+  */5 * * * * GARLIC_URL=https://garlic.example.com GARLIC_TOKEN=… garlic sync
+  ```
+
+- **`GARLIC_SYNC=blocking`** makes the hooks themselves flush synchronously. Use
+  it on ephemeral/managed hosts (CI, cloud agents) where the container may be
+  reclaimed before any `status` or cron runs, so there's no "later" left to sync
+  in. In this mode the prompt hook also nudges from the merged total, so a break
+  threshold fires once across machines.
+
+`garlic statusline` always reads local state so the status bar stays instant;
+run `garlic status` for the shared cross-machine total. `ignore` and `reset`
+apply locally and, when a backend is configured, mirror to it too.
+
+The backend owns *state*; your local `~/.garlic/config.toml` still drives time
+accounting and the nudge wording, and is sent with each request.
+
+> **Nudges:** in the default (non-blocking) mode, break nudges are evaluated
+> against *this machine's* local total, so hooks stay instant and
+> offline-tolerant; the shared total is what `garlic status` and the backend
+> reconcile. On a single machine the two are identical — only set
+> `GARLIC_SYNC=blocking` if you want nudge thresholds shared across machines in
+> real time.
 
 ## Project layout
 
 `garlic` is a Rust crate (`garlic-ward`) that builds a single binary named `garlic`. Source modules in `src/`:
 
 - `cli.rs` — CLI parsing (clap) and subcommand dispatch
-- `commands.rs` — implementations of `status` (with `--week`/`--month` summaries), `statusline`, `set`, `reset`, `ignore`, `setup`, `version`
+- `commands.rs` — implementations of `status` (with `--week`/`--month` summaries), `statusline`, `set`, `reset`, `ignore`, `sync`, `setup`, `version`
 - `intervals.rs` — interval types (agent/user spans tagged by session) and the sweep-line that derives daily totals, the agent/user split, and concurrency
 - `config.rs` — loads/creates `~/.garlic/config.toml` with defaults
 - `state.rs` — reads/writes `~/.garlic/state.toml` under an advisory file lock, handles daily reset
@@ -218,6 +256,7 @@ tracking that one event — while interactive commands report the error
 - `setup.rs` — installs/updates hooks in `~/.claude/settings.json`
 - `version.rs` — daily crates.io update check
 - `remote.rs` — client for the optional shared-state backend (`$GARLIC_URL`/`$GARLIC_TOKEN`)
+- `sync.rs` — local-first sync policy: pushes the day's intervals to the backend (`garlic sync`, or inline when `GARLIC_SYNC=blocking`)
 - `paths.rs` — resolves `~/.garlic` (overridable via `$GARLIC_DIR`) and `~/.claude`
 
 Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, file-locked for concurrent sessions). Set `$GARLIC_DIR` to relocate it.
