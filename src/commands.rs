@@ -16,7 +16,7 @@ use crate::remote::Remote;
 use crate::setup::install_hooks;
 use crate::state::{load_state, load_state_for_date, save_state, State};
 use crate::sync::flush;
-use crate::version::{check_latest_version, CRATES_API_URL};
+use crate::version::{check_latest_version, parse_version, CRATES_API_URL};
 
 const GARLIC: &str = "\u{1f9c4}";
 const VAMPIRE: &str = "\u{1f9db}";
@@ -70,18 +70,104 @@ fn shift(now_local: NaiveDateTime, reset_hour: i64) -> NaiveDateTime {
     }
 }
 
-pub fn cmd_version(paths: &Paths, now: f64, out: &mut dyn Write) -> i32 {
+pub fn cmd_version(paths: &Paths, now: f64, confirm: &mut dyn Confirm, out: &mut dyn Write) -> i32 {
     let version = env!("CARGO_PKG_VERSION");
     let _ = writeln!(out, "garlic {version}");
     if let Some(latest) = check_latest_version(version, &paths.version_cache(), CRATES_API_URL, now)
     {
+        // The 24h cache returns the last-seen latest without re-comparing, so a
+        // fresh cache can still name a version we've since upgraded to. Skip the
+        // notice (and the brew prompt) unless it's genuinely newer than us.
+        if parse_version(&latest) <= parse_version(version) {
+            return 0;
+        }
         let _ = writeln!(out, "  update available: {latest}");
-        let _ = writeln!(
-            out,
-            "  run: cargo install garlic-ward --force  (or: cargo binstall garlic-ward)"
-        );
+        match decide_upgrade(installed_via_homebrew(), confirm, out) {
+            UpgradeAction::ShowCargo => {
+                let _ = writeln!(
+                    out,
+                    "  run: cargo install garlic-ward --force  (or: cargo binstall garlic-ward)"
+                );
+            }
+            UpgradeAction::ShowBrew => {
+                let _ = writeln!(out, "  run: brew upgrade --cask garlic");
+            }
+            UpgradeAction::RunBrew => run_brew_upgrade(out),
+        }
     }
     0
+}
+
+/// What to do about an available update, given how garlic was installed.
+#[derive(Debug, PartialEq, Eq)]
+enum UpgradeAction {
+    /// Non-Homebrew install: print the cargo/binstall command.
+    ShowCargo,
+    /// Homebrew install, user declined (or no TTY): print the brew command.
+    ShowBrew,
+    /// Homebrew install, user confirmed: run `brew upgrade` for them.
+    RunBrew,
+}
+
+/// For a Homebrew install, ask whether to upgrade now; otherwise fall back to
+/// the cargo instructions. A declined prompt or EOF leaves the user the command
+/// to run themselves.
+fn decide_upgrade(
+    is_homebrew: bool,
+    confirm: &mut dyn Confirm,
+    out: &mut dyn Write,
+) -> UpgradeAction {
+    if !is_homebrew {
+        return UpgradeAction::ShowCargo;
+    }
+    match confirm.ask("garlic: run `brew upgrade --cask garlic` now? [y/N] ") {
+        Some(answer) if matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") => {
+            UpgradeAction::RunBrew
+        }
+        Some(_) => UpgradeAction::ShowBrew,
+        None => {
+            let _ = writeln!(out);
+            UpgradeAction::ShowBrew
+        }
+    }
+}
+
+/// Whether this binary lives in a Homebrew Cask install. Casks symlink
+/// `<prefix>/bin/garlic` to `<prefix>/Caskroom/garlic/<version>/garlic`, so the
+/// resolved executable path contains a `Caskroom` component.
+fn installed_via_homebrew() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let resolved = std::fs::canonicalize(&exe).unwrap_or(exe);
+    resolved.components().any(|c| c.as_os_str() == "Caskroom")
+}
+
+/// Shell out to `brew upgrade --cask garlic`, inheriting stdio so the user sees
+/// brew's live progress.
+fn run_brew_upgrade(out: &mut dyn Write) {
+    let _ = writeln!(out, "garlic: running `brew upgrade --cask garlic`...");
+    let _ = out.flush();
+    match std::process::Command::new("brew")
+        .args(["upgrade", "--cask", "garlic"])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            let _ = writeln!(out, "garlic: upgrade complete");
+        }
+        Ok(status) => {
+            let _ = writeln!(
+                out,
+                "garlic: brew upgrade exited with {status}; retry with `brew upgrade --cask garlic`"
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(
+                out,
+                "garlic: could not run brew ({e}); upgrade manually with `brew upgrade --cask garlic`"
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1330,6 +1416,50 @@ mod tests {
         let mut confirm = ScriptedConfirm::new(vec![None]);
         let mut out = Vec::new();
         assert_eq!(prompt_config(&mut confirm, &mut out), None);
+    }
+
+    // --- decide_upgrade (version self-update path) ---
+
+    #[test]
+    fn decide_upgrade_non_homebrew_shows_cargo_without_prompting() {
+        let mut confirm = ScriptedConfirm::new(vec![]);
+        let mut out = Vec::new();
+        assert_eq!(
+            decide_upgrade(false, &mut confirm, &mut out),
+            UpgradeAction::ShowCargo
+        );
+        assert!(confirm.prompts.is_empty());
+    }
+
+    #[test]
+    fn decide_upgrade_homebrew_yes_runs_brew() {
+        let mut confirm = ScriptedConfirm::new(vec![Some("y")]);
+        let mut out = Vec::new();
+        assert_eq!(
+            decide_upgrade(true, &mut confirm, &mut out),
+            UpgradeAction::RunBrew
+        );
+        assert!(confirm.prompts[0].contains("brew upgrade --cask garlic"));
+    }
+
+    #[test]
+    fn decide_upgrade_homebrew_no_shows_brew() {
+        let mut confirm = ScriptedConfirm::new(vec![Some("n")]);
+        let mut out = Vec::new();
+        assert_eq!(
+            decide_upgrade(true, &mut confirm, &mut out),
+            UpgradeAction::ShowBrew
+        );
+    }
+
+    #[test]
+    fn decide_upgrade_homebrew_eof_shows_brew() {
+        let mut confirm = ScriptedConfirm::new(vec![None]);
+        let mut out = Vec::new();
+        assert_eq!(
+            decide_upgrade(true, &mut confirm, &mut out),
+            UpgradeAction::ShowBrew
+        );
     }
 
     // --- cmd_ignore / cmd_status / cmd_statusline ---

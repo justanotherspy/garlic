@@ -90,6 +90,26 @@ fn version_subcommand_shows_update_from_cache() {
 }
 
 #[test]
+fn version_subcommand_no_nag_when_cached_latest_not_newer() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path().join(".garlic");
+    std::fs::create_dir_all(&dir).unwrap();
+    // A fresh cache can still name a version we've since upgraded past; an
+    // older-or-equal cached version must not trigger the upgrade notice.
+    std::fs::write(
+        dir.join("version_cache.toml"),
+        "checked_at = 9999999999.0\nlatest_version = \"0.0.1\"\n",
+    )
+    .unwrap();
+
+    garlic(&dir)
+        .arg("version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("update available").not());
+}
+
+#[test]
 fn no_args_prints_help_and_exits_1() {
     let tmp = TempDir::new().unwrap();
     garlic(tmp.path())

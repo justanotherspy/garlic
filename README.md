@@ -111,7 +111,7 @@ Your existing `~/.garlic/` config and tracking state are preserved, so you keep 
 cargo install garlic-ward --force   # or: cargo binstall garlic-ward
 ```
 
-`garlic version` checks crates.io once a day and tells you when a newer release is available.
+`garlic version` checks crates.io once a day and tells you when a newer release is available. If garlic was installed via the Homebrew cask, it detects that and offers to run `brew upgrade --cask garlic` for you (it asks first — answer `y` to upgrade in place, or anything else to get the command to run yourself). Otherwise it prints the `cargo install` command above.
 
 Then re-run `garlic setup` to update your hooks if the release notes mention hook changes.
 

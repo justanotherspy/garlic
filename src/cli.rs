@@ -136,7 +136,7 @@ pub fn run() -> i32 {
     let remote = Remote::from_env();
 
     match command {
-        Command::Version => cmd_version(&paths, unix_now(), &mut out),
+        Command::Version => cmd_version(&paths, unix_now(), &mut StdinConfirm, &mut out),
         Command::Setup {
             debug,
             yes,
