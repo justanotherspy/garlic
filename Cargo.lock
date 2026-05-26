@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "garlic-ward"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "assert_cmd",
  "chrono",
