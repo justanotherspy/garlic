@@ -80,13 +80,16 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
-    name: Publish to crates.io
+    name: Publish to crates.io and Homebrew tap
     runs-on: ubuntu-latest
-    needs: [verify, test]
+    # Also needs upload-binaries: the Homebrew steps below download the released
+    # macOS binaries to compute their checksums for the cask.
+    needs: [verify, test, upload-binaries]
     environment:
       name: crates-io
       url: https://crates.io/crates/garlic-ward
     permissions:
+      contents: read
       # Trusted Publishing: mint a short-lived crates.io token via OIDC.
       # Configure Trusted Publishing for `garlic-ward` on crates.io, OR remove
       # the auth-action step below and set a CARGO_REGISTRY_TOKEN secret.
@@ -106,13 +109,8 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
-  homebrew:
-    name: Update Homebrew tap
-    runs-on: ubuntu-latest
-    needs: [verify, upload-binaries]
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
+      # Homebrew tap publishing runs here (rather than in a standalone job) so it
+      # can read HOMEBREW_TAP_GITHUB_TOKEN, an environment secret on crates-io.
       - name: Render cask from the released macOS binaries
         env:
           VERSION: ${{ needs.verify.outputs.version }}
@@ -164,7 +162,7 @@ jobs:
     # Run only after the binaries are attached and the cask is published, so the
     # "Latest" badge never points at a half-published release. Publish the
     # drafted release as a pre-release; this step flips it to the full release.
-    needs: [upload-binaries, homebrew]
+    needs: [upload-binaries, publish]
     permissions:
       contents: write
     steps:
