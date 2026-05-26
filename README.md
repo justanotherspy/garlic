@@ -49,6 +49,24 @@ Or, without a Rust toolchain, grab a prebuilt binary with [cargo-binstall](https
 cargo binstall garlic-ward
 ```
 
+On macOS you can install the prebuilt binary with [Homebrew](https://brew.sh):
+
+```bash
+brew install --cask justanotherspy/tap/garlic
+```
+
+Or tap once, then install by short name:
+
+```bash
+brew tap justanotherspy/tap
+brew install --cask garlic
+```
+
+Upgrade later with `brew upgrade --cask garlic`. The cask is republished to
+[`justanotherspy/homebrew-tap`](https://github.com/justanotherspy/homebrew-tap)
+automatically on every release. (The cask is macOS-only; on Linux/WSL use
+`cargo install garlic-ward`, `cargo binstall garlic-ward`, or a prebuilt binary.)
+
 You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
 
 Run setup to install the Claude Code hooks:
@@ -290,5 +308,12 @@ and documented in [`backend/README.md`](backend/README.md).
 - Run `make release BUMP=patch|minor|major` (bumps `Cargo.toml`, opens a PR; needs `cargo install cargo-edit`)
 - Merge the release PR
 - Release drafter updates the draft GitHub release
-- Publish the draft release
-- The release workflow then publishes `garlic-ward` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release
+- Publish the draft release **as a pre-release**
+- The release workflow then:
+  - publishes `garlic-ward` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release;
+  - regenerates the Homebrew cask from the macOS binaries and pushes it to [`justanotherspy/homebrew-tap`](https://github.com/justanotherspy/homebrew-tap) (`Casks/garlic.rb`); and
+  - promotes the release to **Latest** (clears the pre-release flag) once the binaries and cask are in place, so the "Latest" badge and the tap never point at a half-published release.
+
+The cask push requires a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret — a token
+with `contents:write` on `justanotherspy/homebrew-tap`. The cask template lives
+at [`.github/homebrew/garlic-cask.rb.tmpl`](.github/homebrew/garlic-cask.rb.tmpl).
