@@ -105,3 +105,76 @@ jobs:
         run: cargo publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  homebrew:
+    name: Update Homebrew tap
+    runs-on: ubuntu-latest
+    needs: [verify, upload-binaries]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Render cask from the released macOS binaries
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          tmp="$(mktemp -d)"
+          curl -fsSL --retry 5 --retry-all-errors -o "$tmp/arm.tar.gz"   "$base/garlic-aarch64-apple-darwin.tar.gz"
+          curl -fsSL --retry 5 --retry-all-errors -o "$tmp/intel.tar.gz" "$base/garlic-x86_64-apple-darwin.tar.gz"
+          arm_sha="$(sha256sum "$tmp/arm.tar.gz"   | cut -d' ' -f1)"
+          intel_sha="$(sha256sum "$tmp/intel.tar.gz" | cut -d' ' -f1)"
+          mkdir -p out
+          sed \
+            -e "s/@@VERSION@@/${VERSION}/" \
+            -e "s/@@ARM_SHA@@/${arm_sha}/" \
+            -e "s/@@INTEL_SHA@@/${intel_sha}/" \
+            .github/homebrew/garlic-cask.rb.tmpl > out/garlic.rb
+          echo "Generated cask:"
+          cat out/garlic.rb
+
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: justanotherspy/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Commit and push the cask
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          cp out/garlic.rb homebrew-tap/Casks/garlic.rb
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Casks/garlic.rb; then
+            echo "Cask already up to date; nothing to push."
+            exit 0
+          fi
+          git add Casks/garlic.rb
+          git commit -m "chore(cask): garlic ${TAG}"
+          git push
+
+  promote:
+    name: Promote release to latest
+    runs-on: ubuntu-latest
+    # Run only after the binaries are attached and the cask is published, so the
+    # "Latest" badge never points at a half-published release. Publish the
+    # drafted release as a pre-release; this step flips it to the full release.
+    needs: [upload-binaries, homebrew]
+    permissions:
+      contents: write
+    steps:
+      - name: Mark release as latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false \
+            --prerelease=false \
+            --latest
