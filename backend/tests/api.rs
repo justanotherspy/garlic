@@ -312,7 +312,9 @@ async fn intervals_merge_unions_across_clients() {
 #[tokio::test]
 async fn intervals_check_nudges_reports_threshold() {
     let h = harness();
-    // A single 2-minute span with a 1-minute threshold and check_nudges set.
+    // A single 2-minute span crosses both the 1- and 2-minute thresholds at
+    // once. The response reports the highest (2), and *both* are marked given
+    // so the lower one can't re-fire on a later prompt.
     let (status, body) = post(
         &h.app,
         "/v1/intervals",
@@ -327,7 +329,7 @@ async fn intervals_check_nudges_reports_threshold() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["crossed_threshold"], 2);
-    assert_eq!(body["state"]["nudges_given"], json!([2]));
+    assert_eq!(body["state"]["nudges_given"], json!([1, 2]));
 }
 
 #[tokio::test]

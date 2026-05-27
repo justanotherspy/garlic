@@ -273,19 +273,25 @@ pub fn apply_session_end(
     recompute_total(state);
 }
 
-/// Return the highest threshold newly crossed this call, marking it as given.
-/// Only one (the highest) is marked per call, matching `_check_thresholds`.
+/// Return the highest threshold newly crossed this call, marking every
+/// newly-crossed threshold as given.
+///
+/// When a merge jumps the total past several thresholds at once, marking only
+/// the highest would let the lower ones re-fire one at a time on later prompts
+/// — nagging on every prompt and emitting a less severe message after the final
+/// one. We mark them all and return the highest for the nudge.
 fn check_thresholds(state: &mut State, config: &TimeConfig) -> Option<i64> {
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
-    for &threshold in thresholds.iter().rev() {
+    let mut highest = None;
+    for &threshold in thresholds.iter() {
         if state.accumulated_minutes >= threshold as f64 && !state.nudges_given.contains(&threshold)
         {
             state.nudges_given.push(threshold);
-            return Some(threshold);
+            highest = Some(threshold);
         }
     }
-    None
+    highest
 }
 
 /// Whether we're in the bedtime window (the hour before `reset_hour`) and
@@ -471,6 +477,20 @@ mod tests {
             nudges_given: vec![60],
             ..State::default()
         };
+        assert_eq!(check_thresholds(&mut state, &config()), None);
+    }
+
+    #[test]
+    fn multi_cross_marks_all_lower_thresholds_no_renag() {
+        // A merge jumps the total past two thresholds at once: both must be
+        // marked so the lower one doesn't re-fire on the next prompt.
+        let mut state = State {
+            accumulated_minutes: 130.0, // past 60 and 120 (config [60,120,180,240])
+            ..State::default()
+        };
+        assert_eq!(check_thresholds(&mut state, &config()), Some(120));
+        assert!(state.nudges_given.contains(&60));
+        assert!(state.nudges_given.contains(&120));
         assert_eq!(check_thresholds(&mut state, &config()), None);
     }
 
