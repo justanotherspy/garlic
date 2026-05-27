@@ -29,5 +29,17 @@
       "mcp__linear__save_milestone",
       "mcp__linear__save_project"
     ]
+  },
+  "extraKnownMarketplaces": {
+    "justanotherspy": {
+      "source": {
+        "source": "github",
+        "repo": "justanotherspy/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "shuck@justanotherspy": true,
+    "garlic@justanotherspy": true
   }
 }
