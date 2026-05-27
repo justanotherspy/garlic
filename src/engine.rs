@@ -153,19 +153,28 @@ pub fn handle_session_end(
 }
 
 /// Return the highest newly-crossed threshold, or `None`.
+///
+/// When a single event jumps the total past several thresholds at once (an
+/// agent generation can add up to `max_generation_minutes`, only counted at the
+/// next prompt), *all* of those thresholds are marked given — not just the
+/// highest. Marking only the highest would leave the lower ones to re-fire one
+/// at a time on later prompts, nagging on every prompt and emitting a less
+/// severe message after the final "session over" one. We still return the
+/// highest so the nudge reflects how far past you are.
 fn check_thresholds(state: &mut State, config: &Config) -> Option<i64> {
     let accumulated = state.accumulated_minutes;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
 
-    for &threshold in thresholds.iter().rev() {
+    let mut highest = None;
+    for &threshold in thresholds.iter() {
         if accumulated >= threshold as f64 && !state.nudges_given.contains(&threshold) {
             state.nudges_given.push(threshold);
-            return Some(threshold);
+            highest = Some(threshold);
         }
     }
 
-    None
+    highest
 }
 
 /// Return `true` if we're in the bedtime window and haven't nudged yet.
@@ -290,6 +299,20 @@ mod tests {
         s.accumulated_minutes = 121.0;
         assert_eq!(check_thresholds(&mut s, &config()), Some(120));
         assert!(s.nudges_given.contains(&120));
+    }
+
+    #[test]
+    fn multi_cross_marks_all_lower_thresholds_no_renag() {
+        // A single event jumps past two thresholds at once (e.g. a long agent
+        // generation counted at the next prompt). Both must be marked so the
+        // lower one doesn't re-fire on the following prompt.
+        let mut s = state();
+        s.accumulated_minutes = 130.0; // past 60 and 120 (config [60,120,180,240])
+        assert_eq!(check_thresholds(&mut s, &config()), Some(120));
+        assert!(s.nudges_given.contains(&60));
+        assert!(s.nudges_given.contains(&120));
+        // No further nudge on the next prompt at the same total.
+        assert_eq!(check_thresholds(&mut s, &config()), None);
     }
 
     #[test]
