@@ -1,0 +1,13 @@
+{
+  "name": "garlic",
+  "version": "0.1.0",
+  "description": "Ward off AI burnout — track active Claude Code time via hooks and get break nudges, plus a /garlic status command. Requires the garlic binary on PATH (cargo install garlic-ward).",
+  "author": {
+    "name": "justanotherspy",
+    "email": "daniel.schwartz@hey.com"
+  },
+  "homepage": "https://github.com/justanotherspy/garlic",
+  "repository": "https://github.com/justanotherspy/garlic",
+  "license": "MIT",
+  "keywords": ["productivity", "wellbeing", "time-tracking", "hooks", "claude-code"]
+}

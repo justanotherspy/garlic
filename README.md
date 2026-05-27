@@ -103,6 +103,27 @@ garlic setup --defaults
 
 Setup is idempotent — safe to run again if you need to repair or update hooks.
 
+### Claude Code plugin (alternative to `garlic setup`)
+
+garlic is also published as a Claude Code plugin through justanotherspy's central
+marketplace, [`justanotherspy/claude-plugins`](https://github.com/justanotherspy/claude-plugins).
+The plugin bundles the same `/garlic` command and the session-start / prompt /
+stop / session-end tracking hooks (which call the `garlic` binary on your
+`PATH`), so enabling it does what `garlic setup` does — without editing your
+`~/.claude/settings.json`. Install garlic first (see above), then from within
+Claude Code:
+
+```
+/plugin marketplace add justanotherspy/claude-plugins
+/plugin install garlic@justanotherspy
+```
+
+> **Pick one mechanism, not both.** The plugin and `garlic setup` register the
+> *same* hooks. If you enable the plugin **and** have run `garlic setup`, every
+> event fires twice and your tracked time is double-counted. Use the plugin
+> *or* `garlic setup` — if you switch to the plugin, remove garlic's hooks from
+> `~/.claude/settings.json` (re-run is fine; they start with `garlic hook`).
+
 ## Migrating from the Python version
 
 Earlier releases of garlic shipped as a Python package (`garlic-cli`) installed with [uv](https://github.com/astral-sh/uv). The current release is a self-contained Rust binary (`garlic-ward`) with no Python runtime required. To migrate, first uninstall the old Python tool, then install the Rust version and re-run setup:
