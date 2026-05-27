@@ -20,6 +20,17 @@ cask "garlic" do
 
   binary "garlic"
 
+  # The released binaries are not Apple-notarized, so Homebrew's quarantine
+  # flag makes Gatekeeper block them as "from an unidentified developer."
+  # Strip com.apple.quarantine so the binary runs after install.
+  # must_succeed: false — the attribute is absent when installed with
+  # --no-quarantine, and xattr -d errors on a missing attribute.
+  postflight do
+    system_command "/usr/bin/xattr",
+                   args:         ["-dr", "com.apple.quarantine", "#{staged_path}/garlic"],
+                   must_succeed: false
+  end
+
   caveats <<~EOS
     garlic hooks into Claude Code. To install the hooks, run:
       garlic setup

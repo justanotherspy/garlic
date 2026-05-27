@@ -67,6 +67,16 @@ Upgrade later with `brew upgrade --cask garlic`. The cask is republished to
 automatically on every release. (The cask is macOS-only; on Linux/WSL use
 `cargo install garlic-ward`, `cargo binstall garlic-ward`, or a prebuilt binary.)
 
+The prebuilt binaries aren't Apple-notarized, so macOS Gatekeeper would
+normally block them as "from an unidentified developer." The cask strips the
+`com.apple.quarantine` flag on install, so `garlic` just runs. If you installed
+a binary manually (not via the cask) and macOS blocks it, clear the flag
+yourself:
+
+```bash
+xattr -dr com.apple.quarantine "$(command -v garlic)"
+```
+
 You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
 
 Run setup to install the Claude Code hooks:
