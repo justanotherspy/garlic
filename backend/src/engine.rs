@@ -159,6 +159,13 @@ fn seed_baseline(state: &mut State, anchor: f64) {
 }
 
 fn recompute_total(state: &mut State) {
+    // With no intervals yet, leave `accumulated_minutes` untouched: an event
+    // that closed no cursor (or a plain sync with no incoming intervals)
+    // records nothing, and a migrated pre-interval baseline must not be zeroed
+    // — it's seeded into a synthetic interval once a real interval is recorded.
+    if state.intervals.is_empty() {
+        return;
+    }
     state.accumulated_minutes = breakdown(&state.intervals).total;
 }
 
@@ -492,6 +499,36 @@ mod tests {
         assert!(state.nudges_given.contains(&60));
         assert!(state.nudges_given.contains(&120));
         assert_eq!(check_thresholds(&mut state, &config()), None);
+    }
+
+    #[test]
+    fn upgrade_baseline_survives_event_without_open_cursor() {
+        // Migrated state (accumulated > 0, no intervals, no cursor). An event
+        // that closes no cursor records no interval and must not zero the
+        // migrated baseline via recompute.
+        let base = 1_710_567_900.0;
+        let clock = FixedClock::new(base);
+        let mut state = State {
+            accumulated_minutes: 90.0,
+            ..State::default()
+        };
+        apply_stop(&mut state, &config(), "a", &clock);
+        assert!((state.accumulated_minutes - 90.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn empty_sync_preserves_migrated_baseline() {
+        // A plain sync (no incoming intervals) against a migrated backend state
+        // must not zero the total.
+        let clock = FixedClock::new(1_710_567_900.0);
+        let mut state = State {
+            accumulated_minutes: 75.0,
+            ..State::default()
+        };
+        let (crossed, bedtime) = merge_intervals(&mut state, &config(), vec![], false, &clock);
+        assert_eq!(crossed, None);
+        assert!(!bedtime);
+        assert!((state.accumulated_minutes - 75.0).abs() < 0.01);
     }
 
     #[test]
