@@ -28,7 +28,10 @@ impl AppConfig {
     ///
     /// Optional:
     /// - `GARLIC_BIND` (default `0.0.0.0:8080`)
-    /// - `GARLIC_TLS_CERT` + `GARLIC_TLS_KEY` — enable native HTTPS
+    /// - `GARLIC_TLS_CERT` + `GARLIC_TLS_KEY` — reserved for TLS configuration.
+    ///   The binary itself serves plain HTTP and expects TLS to be terminated by
+    ///   a reverse proxy (see `backend/README.md`); setting these only validates
+    ///   that both are present and emits a startup warning.
     pub fn from_env() -> Result<Self, String> {
         let bind_raw = env_or("GARLIC_BIND", "0.0.0.0:8080");
         let bind_addr: SocketAddr = bind_raw
