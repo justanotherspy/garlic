@@ -83,7 +83,16 @@ fn seed_baseline(state: &mut State, anchor: f64) {
 }
 
 /// Recompute the persisted daily total as the union of all intervals.
+///
+/// When there are no intervals yet, leave `accumulated_minutes` untouched: an
+/// event that closed no cursor records no interval, and a migrated pre-interval
+/// baseline (`accumulated_minutes > 0` with an empty `intervals`) must not be
+/// zeroed here — it's seeded into a synthetic interval the first time a real
+/// interval is recorded. Once any interval exists the union is the truth.
 fn recompute_total(state: &mut State) {
+    if state.intervals.is_empty() {
+        return;
+    }
     state.accumulated_minutes = breakdown(&state.intervals).total;
 }
 
@@ -394,6 +403,32 @@ mod tests {
         handle_prompt(&mut s, &cfg, "a", at(base, 2.0), false); // closes user [0,2]
         assert!((s.accumulated_minutes - 52.0).abs() < 0.01); // 50 migrated + 2
         assert!(s.intervals.iter().any(|i| i.session_id == "migrated"));
+    }
+
+    #[test]
+    fn upgrade_baseline_survives_event_without_open_cursor() {
+        // Migrated state (accumulated > 0, no intervals, no cursors — as a
+        // pre-upgrade session has). The first post-upgrade event can be a
+        // prompt/stop/session-end for a session that has no open cursor yet.
+        // Such an event closes no cursor and records no interval, so the
+        // recompute must NOT zero the migrated baseline.
+        let cfg = config();
+        for event in ["prompt", "stop", "session-end"] {
+            let mut s = state();
+            s.accumulated_minutes = 90.0;
+            match event {
+                "prompt" => {
+                    handle_prompt(&mut s, &cfg, "a", NOW, false);
+                }
+                "stop" => handle_stop(&mut s, &cfg, "a", NOW, false),
+                _ => handle_session_end(&mut s, &cfg, "a", NOW, false),
+            }
+            assert!(
+                (s.accumulated_minutes - 90.0).abs() < 0.01,
+                "{event}: migrated baseline wiped, got {}",
+                s.accumulated_minutes
+            );
+        }
     }
 
     #[test]

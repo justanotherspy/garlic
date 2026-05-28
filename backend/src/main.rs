@@ -22,6 +22,18 @@ async fn main() {
         }
     };
 
+    // This binary serves plain HTTP only; TLS termination is expected to live in
+    // a reverse proxy (see backend/README.md). If an operator set TLS paths they
+    // likely believe traffic is encrypted — warn loudly so they don't ship
+    // tokens in the clear by mistake.
+    if config.tls_enabled() {
+        tracing::warn!(
+            "GARLIC_TLS_CERT/GARLIC_TLS_KEY are set, but this binary does not \
+             terminate TLS — it is serving plain HTTP. Put it behind a \
+             TLS-terminating reverse proxy (see backend/README.md)."
+        );
+    }
+
     let conn = match build_redis(&config.redis_url).await {
         Ok(c) => c,
         Err(e) => {

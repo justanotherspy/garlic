@@ -903,6 +903,12 @@ pub fn prompt_config(confirm: &mut dyn Confirm, out: &mut dyn Write) -> Option<C
                     v.push(t);
                     t += interval;
                 }
+                // An interval larger than the default daily cap would otherwise
+                // produce *no* thresholds (and thus no nudges at all). Keep at
+                // least the single requested threshold so nudging still fires.
+                if v.is_empty() {
+                    v.push(interval);
+                }
                 ov.nudge_thresholds_minutes = Some(v);
             }
             _ => {
@@ -1389,6 +1395,16 @@ mod tests {
         assert_eq!(result.max_prompt_gap_minutes, Some(20));
         assert_eq!(result.reset_hour, Some(4));
         assert_eq!(result.nudge_style, Some("spicy".to_string()));
+    }
+
+    #[test]
+    fn prompt_config_interval_over_cap_keeps_single_threshold() {
+        // An interval larger than the default cap (240) must still yield a
+        // non-empty threshold list, otherwise nudging would silently never fire.
+        let mut confirm = ScriptedConfirm::new(vec![Some("300"), Some(""), Some(""), Some("")]);
+        let mut out = Vec::new();
+        let result = prompt_config(&mut confirm, &mut out).unwrap();
+        assert_eq!(result.nudge_thresholds_minutes, Some(vec![300]));
     }
 
     #[test]
