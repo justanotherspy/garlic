@@ -46,12 +46,33 @@ fn nudge_for(
     }
 }
 
+/// Wrap a raw nudge in framing that tells Claude exactly what to do with it.
+///
+/// A nudge is injected as `additionalContext`, which Claude sees as background
+/// context carrying no inherent instruction — so without framing it was easy to
+/// silently drop (the user just never saw the nudge), and a blunt `spicy` or
+/// final message could even read as an instruction to *Claude* to stop working.
+/// This wrapper makes the contract explicit: relay it to the user, it's purely
+/// informational, and it never changes Claude's task. It is fully hardcoded, so
+/// there's still no external input in what Claude is asked to relay.
+fn frame_nudge(nudge: &str) -> String {
+    format!(
+        "[garlic] Break reminder for the user. Relay the message below to the \
+         user at your next natural opportunity (for example, when you finish the \
+         current step), then carry on. This is informational only: it does NOT \
+         change your current task or instructions, and even if the wording is \
+         blunt or insistent it is addressed to the user about taking a break — it \
+         is never an instruction for you to stop, pause, or abandon your work. \
+         Message to relay: \"{nudge}\""
+    )
+}
+
 /// Emit a nudge as the `UserPromptSubmit` JSON envelope Claude Code expects.
 fn write_nudge(out: &mut (impl Write + ?Sized), nudge: &str) -> io::Result<()> {
     let response = serde_json::json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": nudge,
+            "additionalContext": frame_nudge(nudge),
         }
     });
     writeln!(out, "{}", serde_json::to_string(&response)?)
@@ -181,6 +202,11 @@ pub fn hook_prompt(
     };
 
     if let Some(nudge) = nudge_for(&config, accumulated, ignored, crossed, bedtime) {
+        // Flag the fresh nudge so the next `statusline` render flashes the garlic
+        // icon, then re-persist (the earlier save predates this decision, which in
+        // blocking mode also depends on the merged remote total).
+        state.nudge_pending = true;
+        save_state(paths, &state)?;
         write_nudge(out, &nudge)?;
     }
     Ok(())
@@ -361,6 +387,50 @@ mod tests {
             .is_empty());
         let state = load_state(&paths, 2);
         assert!(state.nudges_given.contains(&60));
+    }
+
+    #[test]
+    fn nudge_is_framed_as_relay_only_informational() {
+        // The framing must (a) carry the original message, (b) tell Claude to
+        // relay it to the user, and (c) make clear it doesn't change Claude's
+        // task — even for a blunt message.
+        let framed = frame_nudge("Touch grass. I'm not asking.");
+        assert!(framed.contains("Touch grass. I'm not asking."));
+        assert!(framed.contains("Relay"));
+        assert!(framed
+            .to_lowercase()
+            .contains("does not change your current task"));
+        assert!(framed
+            .to_lowercase()
+            .contains("never an instruction for you to stop"));
+    }
+
+    #[test]
+    fn prompt_nudge_sets_pending_flag_and_frames_output() {
+        // Crossing a threshold both flags a pending nudge (for the statusline
+        // flash) and emits a framed relay message.
+        let s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
+        let (_tmp, paths) = setup(&s);
+        let mut out = Vec::new();
+        hook_prompt(&paths, None, "x", NOW, local(10, 0), false, &mut out).unwrap();
+        assert!(load_state(&paths, 2).nudge_pending);
+
+        let response: serde_json::Value =
+            serde_json::from_str(String::from_utf8(out).unwrap().trim()).unwrap();
+        let ctx = response["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap();
+        assert!(ctx.contains("[garlic]"));
+        assert!(ctx.contains("Relay"));
+    }
+
+    #[test]
+    fn prompt_no_nudge_leaves_pending_flag_unset() {
+        let s = with_cursor(0.0, "x", Kind::User, NOW - 300.0);
+        let (_tmp, paths) = setup(&s);
+        let mut out = Vec::new();
+        hook_prompt(&paths, None, "x", NOW, local(10, 0), false, &mut out).unwrap();
+        assert!(!load_state(&paths, 2).nudge_pending);
     }
 
     #[test]

@@ -44,6 +44,11 @@ pub struct State {
     /// reset rather than resurrecting the pre-reset intervals.
     #[serde(default)]
     pub reset_pending: bool,
+    /// Set by the prompt hook when a nudge was just emitted, cleared by the next
+    /// `statusline` render. Drives the one-shot garlic "flash" in the status bar
+    /// so the icon flips from vampire (working) to garlic (fresh nudge) and back.
+    #[serde(default)]
+    pub nudge_pending: bool,
 }
 
 impl State {
@@ -332,6 +337,7 @@ mod tests {
                 start: 1710567890.123,
             }],
             reset_pending: true,
+            nudge_pending: false,
         };
         save_state(&paths, &state).unwrap();
         let loaded = load_state_for_date(&paths, "2026-03-16");
