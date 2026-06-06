@@ -26,6 +26,8 @@ Internally each cycle is tracked as **intervals** tagged by session: a UserPromp
 
 As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
+Nudges are delivered to Claude wrapped in a fixed relay instruction: the message is purely informational, addressed to *you* about taking a break, and Claude is told to pass it along at its next natural opportunity without changing or stopping the task it's working on. So even a `spicy` or final "session over" nudge won't derail your work — Claude just relays what garlic said and carries on.
+
 If you're still coding in the hour before the daily reset (1 AM by default, when `reset_hour` is 2), garlic sends a bedtime nudge — a distinct "wrap up and get some sleep" message that fires once per night.
 
 ## Compatibility
@@ -198,7 +200,12 @@ To wire garlic into Claude Code's built-in status bar, run this in Claude Code:
 /statusline add the output of the `garlic statusline` command to our status line
 ```
 
-This shows a single-line readout like `🧄 2h 15m / 4h` — your accumulated time and daily target — refreshed on each Claude Code event.
+This shows a single-line readout like `🧛 2h 15m / 4h · agent 1h 30m · user 45m` —
+your accumulated time and daily target, broken down into agent generation time
+and your own reading/thinking time — refreshed on each Claude Code event. The
+icon is normally the vampire 🧛 (you're working, being drained); it flashes to
+garlic 🧄 for one refresh whenever a fresh break nudge has just fired, so the
+ward briefly shows when garlic speaks up.
 
 ## Configuration
 

@@ -344,34 +344,44 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
 
 pub fn cmd_statusline(paths: &Paths, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
-    let state = load_state(paths, config.reset_hour);
-    statusline_core(&state, &config, out)
+    let mut state = load_state(paths, config.reset_hour);
+    let code = statusline_core(&state, &config, out);
+    // A fresh nudge flashes the garlic icon for a single render; clear the flag
+    // so the next refresh flips back to the vampire (working) icon.
+    if state.nudge_pending {
+        state.nudge_pending = false;
+        let _ = save_state(paths, &state);
+    }
+    code
 }
 
 fn statusline_core(state: &State, config: &Config, out: &mut dyn Write) -> i32 {
     let minutes = state.accumulated_minutes;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
-    let nudges_given = &state.nudges_given;
 
     let time_str = format_duration(minutes);
-    let next_t = thresholds
-        .iter()
-        .find(|t| !nudges_given.contains(t))
-        .copied();
-    let fraction = match next_t {
-        Some(t) => minutes / t as f64,
-        None => 1.0,
-    };
-    let icon = if fraction >= 0.85 { VAMPIRE } else { GARLIC };
+    // Vampire while you're working (being drained); the garlic ward flashes for
+    // one render when a fresh nudge has just been emitted.
+    let icon = if state.nudge_pending { GARLIC } else { VAMPIRE };
 
     let mut line = if let Some(max_t) = thresholds.last() {
         format!("{icon} {time_str} / {}", format_duration(*max_t as f64))
     } else {
         format!("{icon} {time_str}")
     };
+
+    // Agent vs. user split, so the bar shows where the time actually went.
+    let split = breakdown(&state.intervals);
+    if split.agent > 0.0 || split.user > 0.0 {
+        line.push_str(&format!(
+            " {MIDDOT} agent {} {MIDDOT} user {}",
+            format_duration(split.agent),
+            format_duration(split.user),
+        ));
+    }
     // Concurrency marker: 2+ sessions overlapped at some point today.
-    if breakdown(&state.intervals).overlap > 0.0 {
+    if split.overlap > 0.0 {
         line.push_str(&format!(" {CONCURRENT}"));
     }
     if state.ignored {
@@ -819,6 +829,7 @@ pub fn cmd_reset(
     state.ignored = false;
     state.last_event_time = 0.0;
     state.bedtime_nudge_given = false;
+    state.nudge_pending = false;
     // Clear the intervals too, otherwise the next sync would re-push them and
     // resurrect the total we just zeroed.
     state.intervals.clear();
@@ -1571,24 +1582,42 @@ mod tests {
         write_state(&paths, &crate::state::current_date(2), 45.0, vec![], false);
         let mut out = Vec::new();
         cmd_statusline(&paths, &mut out);
+        // Vampire by default — you're working (being drained).
         assert_eq!(
             String::from_utf8(out).unwrap().trim(),
-            "\u{1f9c4} 45m / 4h 00m"
+            "\u{1f9db} 45m / 4h 00m"
         );
     }
 
+    /// A fresh nudge flashes the garlic icon for one render, then clears so the
+    /// next refresh returns to the vampire icon.
     #[test]
-    fn statusline_vampire_icon() {
+    fn statusline_garlic_flashes_on_pending_nudge() {
         let (_t, paths) = env();
         std::fs::write(
             paths.config(),
             "reset_hour = 2\nnudge_thresholds_minutes = [60, 120]\nnudge_style = \"gentle\"\n",
         )
         .unwrap();
-        write_state(&paths, &crate::state::current_date(2), 51.0, vec![], false);
+        let mut state = State {
+            date: crate::state::current_date(2),
+            accumulated_minutes: 61.0,
+            nudges_given: vec![60],
+            nudge_pending: true,
+            ..State::default()
+        };
+        save_state(&paths, &state).unwrap();
+
         let mut out = Vec::new();
         cmd_statusline(&paths, &mut out);
-        assert!(String::from_utf8(out).unwrap().starts_with('\u{1f9db}'));
+        assert!(String::from_utf8(out).unwrap().starts_with('\u{1f9c4}'));
+
+        // The flag is consumed: the next render is back to the vampire icon.
+        state = load_state(&paths, 2);
+        assert!(!state.nudge_pending);
+        let mut out2 = Vec::new();
+        cmd_statusline(&paths, &mut out2);
+        assert!(String::from_utf8(out2).unwrap().starts_with('\u{1f9db}'));
     }
 
     #[test]
@@ -1604,7 +1633,7 @@ mod tests {
         cmd_statusline(&paths, &mut out);
         assert_eq!(
             String::from_utf8(out).unwrap().trim(),
-            "\u{1f9c4} 30m / 2h 00m (paused)"
+            "\u{1f9db} 30m / 2h 00m (paused)"
         );
     }
 
@@ -1622,6 +1651,43 @@ mod tests {
         let text = String::from_utf8(out).unwrap();
         assert_eq!(text.trim(), "\u{1f9db} 1h 30m");
         assert!(!text.contains('/'));
+    }
+
+    /// The agent/user split is appended when there are tracked intervals.
+    #[test]
+    fn statusline_shows_agent_user_split() {
+        use crate::intervals::{Interval, Kind};
+        let (_t, paths) = env();
+        std::fs::write(
+            paths.config(),
+            "reset_hour = 2\nnudge_thresholds_minutes = [60, 120]\nnudge_style = \"gentle\"\n",
+        )
+        .unwrap();
+        let state = State {
+            date: crate::state::current_date(2),
+            accumulated_minutes: 30.0,
+            intervals: vec![
+                Interval {
+                    session_id: "s".to_string(),
+                    kind: Kind::User,
+                    start: 0.0,
+                    end: 600.0, // 10m user
+                },
+                Interval {
+                    session_id: "s".to_string(),
+                    kind: Kind::Agent,
+                    start: 600.0,
+                    end: 1800.0, // 20m agent
+                },
+            ],
+            ..State::default()
+        };
+        save_state(&paths, &state).unwrap();
+        let mut out = Vec::new();
+        cmd_statusline(&paths, &mut out);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("agent 20m"), "got: {text}");
+        assert!(text.contains("user 10m"), "got: {text}");
     }
 
     // --- cmd_stats ---
