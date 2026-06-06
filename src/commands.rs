@@ -344,13 +344,19 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
 
 pub fn cmd_statusline(paths: &Paths, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
-    let mut state = load_state(paths, config.reset_hour);
+    let state = load_state(paths, config.reset_hour);
     let code = statusline_core(&state, &config, out);
     // A fresh nudge flashes the garlic icon for a single render; clear the flag
-    // so the next refresh flips back to the vampire (working) icon.
+    // so the next refresh flips back to the vampire (working) icon. Re-read
+    // first: a concurrent hook may have written new intervals between our load
+    // and now, and garlic supports parallel sessions — saving the stale `state`
+    // would clobber that. Flip only the flag we own.
     if state.nudge_pending {
-        state.nudge_pending = false;
-        let _ = save_state(paths, &state);
+        let mut fresh = load_state(paths, config.reset_hour);
+        if fresh.nudge_pending {
+            fresh.nudge_pending = false;
+            let _ = save_state(paths, &fresh);
+        }
     }
     code
 }
