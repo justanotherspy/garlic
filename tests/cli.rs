@@ -250,6 +250,11 @@ fn hook_prompt_below_threshold_is_silent() {
             kind: Kind::User,
             start: unix_now() - 60.0,
         }],
+        // The binary reads the real wall clock, and the bedtime nudge fires
+        // during the hour before the reset (hour 1 for reset_hour=2). Mark it
+        // already given so this "below threshold → silent" assertion stays
+        // deterministic even when CI runs in that window.
+        bedtime_nudge_given: true,
         ..State::default()
     });
     garlic(&gdir(&tmp))
