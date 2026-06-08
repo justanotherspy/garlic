@@ -1,6 +1,6 @@
 [package]
 name = "garlic-ward"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 rust-version = "1.89"
 description = "Track active coding time with Claude Code and nudge yourself to take breaks"
