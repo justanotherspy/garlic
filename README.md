@@ -350,8 +350,13 @@ and documented in [`backend/README.md`](backend/README.md).
 - The release workflow then:
   - publishes `garlic-ward` to crates.io (via Trusted Publishing / OIDC) and uploads prebuilt binaries for Linux and macOS to the release;
   - regenerates the Homebrew cask from the macOS binaries and pushes it to [`justanotherspy/homebrew-tap`](https://github.com/justanotherspy/homebrew-tap) (`Casks/garlic.rb`); and
-  - promotes the release to **Latest** (clears the pre-release flag) once the binaries and cask are in place, so the "Latest" badge and the tap never point at a half-published release.
+  - promotes the release to **Latest** (clears the pre-release flag) once the binaries and cask are in place, so the "Latest" badge and the tap never point at a half-published release; and
+  - sends a `repository_dispatch` to [`justanotherspy/justanotherspy.com`](https://github.com/justanotherspy/justanotherspy.com) so the website rebuilds and its garlic project page picks up the new version automatically.
 
 The cask push requires a `HOMEBREW_TAP_GITHUB_TOKEN` repository secret — a token
 with `contents:write` on `justanotherspy/homebrew-tap`. The cask template lives
 at [`.github/homebrew/garlic-cask.rb.tmpl`](.github/homebrew/garlic-cask.rb.tmpl).
+The website dispatch requires a `WEBSITE_DISPATCH_TOKEN` repository secret — a
+token with `contents:write` on `justanotherspy/justanotherspy.com`. If the
+secret is missing the step logs a warning and skips; the website also rebuilds
+itself daily as a fallback.
