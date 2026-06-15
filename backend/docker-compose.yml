@@ -10,7 +10,7 @@
 
 services:
   redis:
-    image: redis:8-alpine
+    image: redis:8-alpine@sha256:09160599abd229764c0fb44cb6be640294e1d360a54b19985ab4843dcf2d90f1
     command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
     volumes:
       - garlic-redis-data:/data
@@ -41,7 +41,7 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:77c07d5ebfa5be9fd6c820d2094ae662c9e7eeb9bf98346b7f639900263ee2a2
     profiles: ["tls"]
     depends_on:
       - backend

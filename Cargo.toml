@@ -33,9 +33,9 @@ tempfile = "3"
 dirs = "6"
 
 [dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-httpmock = "0.8"
+assert_cmd = "=2.2.2"
+predicates = "=3.1.4"
+httpmock = "=0.8.3"
 
 # Support `cargo binstall garlic-ward`, pointing at the GitHub Release assets
 # produced by the release workflow (taiki-e/upload-rust-binary-action), which
