@@ -20,7 +20,7 @@ RUN touch src/main.rs src/lib.rs \
     && strip target/release/garlic-backend
 
 # --- Runtime stage ---------------------------------------------------------
-FROM debian:bookworm-slim@sha256:96e378d7e6531ac9a15ad505478fcc2e69f371b10f5cdf87857c4b8188404716 AS runtime
+FROM debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df AS runtime
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
