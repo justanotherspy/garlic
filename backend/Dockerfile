@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 
 # --- Build stage -----------------------------------------------------------
-FROM rust:slim-bookworm@sha256:a5e80efc194cfc8e7453cb27b022f07e6ed212f49fdd4055caf85f8be806538c AS builder
+FROM rust:slim-bookworm@sha256:4732ca96fd086cb9be682050c3f0176288eebaac2b80aa2bcefccfaf198e1950 AS builder
 WORKDIR /app
 
 # Pre-build dependencies as a cacheable layer: compile against stub sources so
