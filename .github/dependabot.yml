@@ -4,12 +4,16 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "cargo"
     directories:
       - "/"
       - "/backend"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     groups:
       rust:
         patterns:
