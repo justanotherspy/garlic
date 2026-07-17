@@ -29,5 +29,5 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-tokio = { version = "=1.52.4", features = ["macros", "rt-multi-thread", "test-util"] }
+tokio = { version = "=1.53.0", features = ["macros", "rt-multi-thread", "test-util"] }
 tower = { version = "=0.5.3", features = ["util"] }
