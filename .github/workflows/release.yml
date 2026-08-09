@@ -110,7 +110,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
       # Homebrew tap publishing runs here (rather than in a standalone job) so it
-      # can read HOMEBREW_TAP_GITHUB_TOKEN, an environment secret on crates-io.
+      # shares this job's OIDC identity, which is what the tap grant trusts.
       - name: Render cask from the released macOS binaries
         env:
           VERSION: ${{ needs.verify.outputs.version }}
@@ -132,11 +132,26 @@ jobs:
           echo "Generated cask:"
           cat out/garlic.rb
 
+      # The default GITHUB_TOKEN only reaches this repo, so checking out and
+      # pushing to justanotherspy/homebrew-tap needs a second credential. Rather
+      # than a long-lived PAT, federate this job's OIDC token for a token scoped
+      # to the tap alone, valid for the length of the run (the action revokes it
+      # in its post step). The grant lives in the tap at
+      # .github/chainguard/garlic.sts.yaml and trusts exactly this job's
+      # subject, repo:justanotherspy/garlic:environment:crates-io — this job
+      # declares environment: crates-io, and an environment always overrides the
+      # ref in the OIDC subject.
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: tap-sts
+        with:
+          scope: justanotherspy/homebrew-tap
+          identity: garlic
+
       - name: Check out the Homebrew tap
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: justanotherspy/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          token: ${{ steps.tap-sts.outputs.token }}
           path: homebrew-tap
 
       - name: Commit and push the cask
