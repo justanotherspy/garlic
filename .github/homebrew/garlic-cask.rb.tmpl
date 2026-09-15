@@ -7,8 +7,7 @@ cask "garlic" do
   sha256 arm:   "@@ARM_SHA@@",
          intel: "@@INTEL_SHA@@"
 
-  url "https://github.com/justanotherspy/garlic/releases/download/v#{version}/garlic-#{arch}-apple-darwin.tar.gz",
-      verified: "github.com/justanotherspy/garlic/"
+  url "https://github.com/justanotherspy/garlic/releases/download/v#{version}/garlic-#{arch}-apple-darwin.tar.gz"
   name "garlic"
   desc "Track active coding time with Claude Code and nudge yourself to take breaks"
   homepage "https://github.com/justanotherspy/garlic"
@@ -25,10 +24,10 @@ cask "garlic" do
   # Strip com.apple.quarantine so the binary runs after install.
   # must_succeed: false — the attribute is absent when installed with
   # --no-quarantine, and xattr -d errors on a missing attribute.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args:         ["-dr", "com.apple.quarantine", "#{staged_path}/garlic"],
-                   must_succeed: false
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args:         ["-dr", "com.apple.quarantine", "{{staged_path}}/garlic"],
+        must_succeed: false
   end
 
   caveats <<~EOS
