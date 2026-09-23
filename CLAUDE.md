@@ -33,7 +33,7 @@ git checkout -b <issue-id>/<short-description>
 2. If it isn't already "In Progress", move it to "In Progress" *before* writing code or opening a PR.
 3. Use the ID in the branch, commits, PR title (`JUS-XX: <description>`), and PR body (link to `https://linear.app/justanotherspy/issue/JUS-XX`).
 
-Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If one is supplied, it must be used.
+Not every PR has a ticket (Renovate dependency updates, small ad-hoc fixes) — that's fine. If one is supplied, it must be used.
 
 **PR:**
 - Always open as a draft PR
@@ -47,6 +47,8 @@ Not every PR has a ticket (dependabot, small ad-hoc fixes) — that's fine. If o
 
 ## CI
 Pin all actions to full commit SHAs.
+
+Renovate is the only dependency updater: `renovate.json` extends the shared `local>justanotherspy/renovate` preset and covers both crates (`/` and `/backend`), the workflow actions, and the backend's Docker images. Keep repo-specific rules in `renovate.json`; there is no Dependabot config.
 
 **When a CI check fails**, always fetch the logs before drawing conclusions. Read the actual error output — don't guess the cause from the check name alone.
 
