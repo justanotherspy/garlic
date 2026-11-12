@@ -6,24 +6,64 @@ tag-template: 'v$RESOLVED_VERSION'
 
 # Categories based on PR labels
 categories:
+  # Version bump PRs stay out of the release notes
+  # (was the deprecated `exclude-labels` block).
+  - type: 'pre-exclude'
+    when:
+      labels:
+        - 'skip-changelog'
+        - 'release'
+
   - title: 'Features'
-    labels:
-      - 'feature'
-      - 'enhancement'
+    when:
+      labels:
+        - 'feature'
+        - 'enhancement'
   - title: 'Bug Fixes'
-    labels:
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
+    when:
+      labels:
+        - 'fix'
+        - 'bugfix'
+        - 'bug'
   - title: 'Documentation'
-    labels:
-      - 'documentation'
-      - 'docs'
+    when:
+      labels:
+        - 'documentation'
+        - 'docs'
   - title: 'Maintenance'
-    labels:
-      - 'chore'
-      - 'dependencies'
-      - 'ci'
+    when:
+      labels:
+        - 'chore'
+        - 'dependencies'
+        - 'ci'
+
+  # Version resolution (was the deprecated `version-resolver` block).
+  - type: 'version-resolver'
+    semver-increment: 'major'
+    when:
+      labels:
+        - 'major'
+        - 'breaking'
+  - type: 'version-resolver'
+    semver-increment: 'minor'
+    when:
+      labels:
+        - 'minor'
+        - 'feature'
+        - 'enhancement'
+  - type: 'version-resolver'
+    semver-increment: 'patch'
+    when:
+      labels:
+        - 'patch'
+        - 'fix'
+        - 'bugfix'
+        - 'bug'
+        - 'chore'
+        - 'documentation'
+  # No `when` condition: the default increment (was `version-resolver.default`).
+  - type: 'version-resolver'
+    semver-increment: 'patch'
 
 # Also categorize by conventional commit prefixes in PR titles
 autolabeler:
@@ -43,32 +83,6 @@ autolabeler:
       - '/^refactor(\(.+\))?:/i'
       - '/^test(\(.+\))?:/i'
       - '/^style(\(.+\))?:/i'
-
-# Exclude version bump PRs from release notes
-exclude-labels:
-  - 'skip-changelog'
-  - 'release'
-
-# Version resolver based on labels
-version-resolver:
-  major:
-    labels:
-      - 'major'
-      - 'breaking'
-  minor:
-    labels:
-      - 'minor'
-      - 'feature'
-      - 'enhancement'
-  patch:
-    labels:
-      - 'patch'
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
-      - 'chore'
-      - 'documentation'
-  default: patch
 
 # Template for release notes
 template: |
