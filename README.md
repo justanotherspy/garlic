@@ -12,11 +12,11 @@ The idea came from [this article by Steve Yegge](https://steve-yegge.medium.com/
 
 ## How does it work?
 
-`garlic` hooks into Claude Code using its [hooks system](https://docs.anthropic.com/en/docs/claude-code/hooks). It tracks three events:
+`garlic` listens to Claude Code, through its plugin (a Claude Code mod) or through plain [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks). It tracks three events:
 
 - **Session start** — when you open a new Claude Code session
 - **Prompt submit** — when you send a message to Claude
-- **Stop** — when Claude finishes responding
+- **Stop** — when Claude finishes responding (the plugin also sees a turn you interrupt, which the plain Stop hook does not)
 
 From these events, garlic estimates how much time you have spent actively coding each day. It works across multiple concurrent Claude Code sessions by sharing a single state file with file locking.
 
@@ -24,9 +24,20 @@ The time model counts your full engagement cycle: the time Claude spends generat
 
 Internally each cycle is tracked as **intervals** tagged by session: a UserPrompt→Stop span is **agent time** (the agent generating) and a Stop→UserPrompt span is **user time** (you reading, thinking, or typing). `garlic status` shows the split so you can see how an hour divides between agent work and your own planning/review. Your daily total is the **union** of these intervals across all sessions — so running two agents in parallel for an hour counts as one hour of engagement, not two. When sessions do overlap, garlic reports the concurrent time as a neutral fact (e.g. `12m with 2+ sessions running at once`); it is *never* weighted as "more productive," because babysitting multiple agents at once is more draining, not less — exactly the kind of overwork garlic is here to ward off.
 
-As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic asks Claude to gently nudge you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
+As you approach configurable thresholds (every 30 minutes up to 4 hours by default), garlic gently nudges you to consider taking a break. You choose how it nudges — `gentle`, `firm`, or `spicy`. Each threshold only fires once, so you won't be nagged on every prompt. The final threshold delivers a more definitive "session over" message.
 
-Nudges are delivered to Claude wrapped in a fixed relay instruction: the message is purely informational, addressed to *you* about taking a break, and Claude is told to pass it along at its next natural opportunity without changing or stopping the task it's working on. So even a `spicy` or final "session over" nudge won't derail your work — Claude just relays what garlic said and carries on.
+With the plugin, nudges are shown to you directly above the prompt. With plain hooks, nudges are delivered to Claude wrapped in a fixed relay instruction: the message is purely informational, addressed to *you* about taking a break, and Claude is told to pass it along at its next natural opportunity without changing or stopping the task it's working on. So even a `spicy` or final "session over" nudge won't derail your work — Claude just relays what garlic said and carries on.
+
+### What the numbers mean
+
+The goal is one honest figure for how long you spent clauding, shown against how long your agents ran:
+
+- **Total** is wall-clock time during which at least one session was active, counted once however many sessions overlap.
+- **You** is time you were reading, thinking or typing in some session; **agents** is time some agent was generating. Each is a union across sessions, so two agents running side by side for an hour are one agent hour.
+- The total splits three ways with nothing counted twice: **only you**, **you and agents at once** (you worked in one session while an agent ran in another), and **only agents**. `garlic status --json` prints these as `user_only_minutes`, `both_minutes` and `agent_only_minutes`, plus `agents_running`.
+- Figures are **live**: a turn that is still running counts up to now rather than appearing when it ends. With the plugin, a break threshold crossed in the middle of a long turn nudges you then, not at your next prompt.
+
+Known limits: time an agent spends waiting on a permission prompt counts as agent time, background agents that keep running after the main turn ends are not counted, and garlic cannot tell watching an agent work from being away while it works (which is why agent-only time is shown separately rather than called yours).
 
 If you're still coding in the hour before the daily reset (1 AM by default, when `reset_hour` is 2), garlic sends a bedtime nudge — a distinct "wrap up and get some sleep" message that fires once per night.
 
@@ -81,50 +92,79 @@ xattr -dr com.apple.quarantine "$(command -v garlic)"
 
 You can also download a prebuilt binary for your platform from the [latest release](https://github.com/justanotherspy/garlic/releases) and put `garlic` on your `PATH`.
 
-Run setup to install the Claude Code hooks:
-
-```bash
-garlic setup
-```
-
-Setup interactively prompts for key preferences (nudge interval, max prompt gap, reset hour, nudge style) with sensible defaults — just press Enter to accept them all. To skip prompts entirely and use defaults, pass `-y`:
-
-```bash
-garlic setup -y
-```
-
-This does two things:
-1. Creates `~/.garlic/config.toml` (with your chosen settings or sensible defaults)
-2. Adds garlic's hooks to `~/.claude/settings.json` so they run across all your projects
-
-To reset your config to the latest built-in defaults (useful after upgrading):
-
-```bash
-garlic setup --defaults
-```
-
-Setup is idempotent — safe to run again if you need to repair or update hooks.
-
-### Claude Code plugin (alternative to `garlic setup`)
-
-garlic is also published as a Claude Code plugin through justanotherspy's central
-marketplace, [`justanotherspy/claude-plugins`](https://github.com/justanotherspy/claude-plugins).
-The plugin bundles the same `/garlic` command and the session-start / prompt /
-stop / session-end tracking hooks (which call the `garlic` binary on your
-`PATH`), so enabling it does what `garlic setup` does — without editing your
-`~/.claude/settings.json`. Install garlic first (see above), then from within
-Claude Code:
+Then add the garlic plugin from within Claude Code:
 
 ```
 /plugin marketplace add justanotherspy/claude-plugins
 /plugin install garlic@justanotherspy
 ```
 
-> **Pick one mechanism, not both.** The plugin and `garlic setup` register the
-> *same* hooks. If you enable the plugin **and** have run `garlic setup`, every
-> event fires twice and your tracked time is double-counted. Use the plugin
-> *or* `garlic setup` — if you switch to the plugin, remove garlic's hooks from
-> `~/.claude/settings.json` (re-run is fine; they start with `garlic hook`).
+That is the whole setup: `brew install`, then `/plugin install`. The plugin is a
+Claude Code mod. It calls the `garlic` binary on your `PATH` to do the tracking,
+and it draws garlic inside Claude Code:
+
+- **Status line**: `🧛 2h 15m / 4h · you 1h 00m · agents 1h 30m`, kept current
+  while a turn runs.
+- **Break nudges**: shown to you above the prompt, with buttons to pause nudges
+  for the day, open the panel, or dismiss. Nothing is added to your prompt and
+  the model is not asked to relay anything.
+- **`/garlic`**: a small panel with today's time against your daily target, a
+  bar splitting it into only you, you and agents at once, and only agents, and
+  buttons to pause or resume nudges, reset the day (it asks first), and show the
+  week or month.
+
+The status line entry and the nudge band are drawn in the terminal and in the
+desktop app; the panel opens on every surface. Turn the status line entry off
+in the plugin's options (`status_line`) if you already show `garlic statusline`.
+
+The plugin needs a Claude Code that supports mods (function hooks in plugins),
+which is an early-access API. On an older Claude Code the plugin does nothing,
+so use `garlic setup --hooks` there. The plugin's source lives in this
+repository under [`plugins/garlic`](plugins/garlic); the marketplace only points
+at it.
+
+To set your preferences (nudge interval, max prompt gap, reset hour, nudge
+style), run:
+
+```bash
+garlic setup
+```
+
+Setup asks whether you use the plugin (the default) and then prompts for each
+preference; press Enter to accept the defaults. With the plugin it writes
+`~/.garlic/config.toml`, removes any garlic hooks an earlier setup left in
+`~/.claude/settings.json`, and prints the two install commands above.
+
+### Without the plugin: settings hooks
+
+As a fallback, garlic can install plain hooks into `~/.claude/settings.json`,
+which work on any Claude Code:
+
+```bash
+garlic setup --hooks     # config + hooks + the /garlic command file
+garlic setup -y          # the same with every default, no prompts
+```
+
+`garlic setup -y` leaves the hooks out when the plugin is already enabled.
+Setup is idempotent, so it is safe to run again to repair or update hooks. To
+reset your config to the latest built-in defaults (useful after upgrading), run
+`garlic setup --defaults`.
+
+With hooks, a nudge reaches you through Claude: it is wrapped in a fixed relay
+instruction and Claude passes it along. The status line is wired by hand (see
+[Status line](#status-line)), and `/garlic` runs `garlic status` rather than
+opening a panel.
+
+To move from hooks to the plugin, install the plugin and run:
+
+```bash
+garlic setup --remove-hooks
+```
+
+It removes only garlic's own entries and leaves the rest of your settings
+alone. The plugin also notices leftover hooks and offers to remove them. Having
+both does not double your time (the day's total is a union of intervals, and a
+repeated event adds nothing), but you would get each nudge twice.
 
 ## Migrating from the Python version
 
@@ -136,7 +176,7 @@ cargo install garlic-ward   # or: cargo binstall garlic-ward
 garlic setup
 ```
 
-Your existing `~/.garlic/` config and tracking state are preserved, so you keep your settings and daily totals across the switch. Re-running `garlic setup` refreshes the hooks in `~/.claude/settings.json` to point at the new binary.
+Your existing `~/.garlic/` config and tracking state are preserved, so you keep your settings and daily totals across the switch. Re-running `garlic setup` points you at the plugin, or with `--hooks` refreshes the hooks in `~/.claude/settings.json` to point at the new binary.
 
 ## Upgrading
 
@@ -146,7 +186,7 @@ cargo install garlic-ward --force   # or: cargo binstall garlic-ward
 
 `garlic version` checks crates.io once a day and tells you when a newer release is available. If garlic was installed via the Homebrew cask, it detects that and offers to run `brew upgrade --cask garlic` for you (it asks first — answer `y` to upgrade in place, or anything else to get the command to run yourself). Otherwise it prints the `cargo install` command above.
 
-Then re-run `garlic setup` to update your hooks if the release notes mention hook changes.
+The plugin updates through Claude Code (`/plugin update garlic@justanotherspy`). If you use settings hooks instead, re-run `garlic setup --hooks` when the release notes mention hook changes.
 
 ## Usage
 
@@ -185,16 +225,22 @@ garlic sync
 
 ### Slash command
 
-After running `garlic setup`, you can use `/garlic` directly in Claude Code without leaving the conversation. It supports all garlic subcommands:
+`/garlic` works inside Claude Code without leaving the conversation.
 
-- `/garlic` or `/garlic status` — show today's accumulated time (and the agent/user split)
-- `/garlic status --week` — show rolling 7-day summary
-- `/garlic status --month` — show monthly totals and streaks
-- `/garlic ignore` — disable nudging for the rest of the day
+With the plugin:
+
+- `/garlic` opens the panel
+- `/garlic pause` (or `resume`) pauses or resumes nudges for the day
+- `/garlic reset` opens the panel on the reset confirmation
+- `/garlic week` and `/garlic month` show the 7-day and monthly summaries
+
+With settings hooks, `/garlic` passes its arguments to the CLI: `/garlic status`,
+`/garlic status --week`, `/garlic status --month`, `/garlic ignore`.
 
 ### Status line
 
-To wire garlic into Claude Code's built-in status bar, run this in Claude Code:
+The plugin adds its own status line entry. Without the plugin, wire garlic into
+Claude Code's built-in status bar by running this in Claude Code:
 
 ```
 /statusline add the output of the `garlic statusline` command to our status line
@@ -306,10 +352,10 @@ accounting and the nudge wording, and is sent with each request.
 - `intervals.rs` — interval types (agent/user spans tagged by session) and the sweep-line that derives daily totals, the agent/user split, and concurrency
 - `config.rs` — loads/creates `~/.garlic/config.toml` with defaults
 - `state.rs` — reads/writes `~/.garlic/state.toml` under an advisory file lock, handles daily reset
-- `engine.rs` — gap calculation, accumulation, threshold checking
+- `engine.rs` — gap calculation, accumulation, threshold checking, and the live view that projects in-flight intervals up to now
 - `nudges.rs` — hardcoded gentle/firm/spicy message pools
-- `hooks.rs` — handlers for the `session-start`, `prompt`, `stop`, and `session-end` hook subcommands
-- `setup.rs` — installs/updates hooks in `~/.claude/settings.json`
+- `hooks.rs` — handlers for the `session-start`, `prompt`, `stop`, `session-end`, and `tick` hook subcommands, and the `--json` reply the plugin reads
+- `setup.rs` — installs, updates and removes hooks in `~/.claude/settings.json`, and detects the plugin
 - `version.rs` — daily crates.io update check
 - `remote.rs` — client for the optional shared-state backend (`$GARLIC_URL`/`$GARLIC_TOKEN`)
 - `sync.rs` — local-first sync policy: pushes the day's intervals to the backend (`garlic sync`, or inline when `GARLIC_SYNC=blocking`)
@@ -317,14 +363,24 @@ accounting and the nudge wording, and is sent with each request.
 
 Runtime state lives in `~/.garlic/`: `config.toml` (settings) and `state.toml` (daily tracking, file-locked for concurrent sessions). Set `$GARLIC_DIR` to relocate it.
 
-Claude Code hooks written to `~/.claude/settings.json` by `garlic setup`:
+The Claude Code plugin lives in [`plugins/garlic/`](plugins/garlic) and is published through [`justanotherspy/claude-plugins`](https://github.com/justanotherspy/claude-plugins), which references this repository as its source:
+
+- `hooks/register.tsx` — the mod: hands session and turn events to `garlic hook <event> --json`, and draws the status line entry, the nudge band and the `/garlic` panel
+- `hooks/garlic.ts` — pure helpers that read and format what the CLI prints
+- `types/index.d.ts` — the plugin's state contract
+- `tests/garlic.test.tsx` — run with `claude plugin test plugins/garlic`; check the plugin with `claude plugin validate plugins/garlic`
+- `skills/garlic-time/` — a read-only skill so Claude can answer questions about your tracked time
+
+`garlic hook <event> --json` prints one line, `{event, version, nudge, status}`, and is the contract between the plugin and the CLI. The plugin falls back to the plain hook commands with a garlic older than 0.4.0.
+
+Claude Code hooks written to `~/.claude/settings.json` by `garlic setup --hooks`:
 
 - **SessionStart** (matcher `"startup"`) → `garlic hook session-start`
 - **UserPromptSubmit** → `garlic hook prompt`
 - **Stop** → `garlic hook stop`
 - **SessionEnd** → `garlic hook session-end` — finalizes in-flight generation time and clears `last_event_time` so a crashed or killed session can't leak time into the next one
 
-Each hook reads JSON from stdin and either writes plain text to stdout (a nudge) or exits silently.
+Each hook reads JSON from stdin and either writes a nudge to stdout or exits silently.
 
 The optional self-hosted state backend lives in [`backend/`](backend/) — a Rust
 (axum + Redis) HTTP service that ports garlic's state engine server-side so
