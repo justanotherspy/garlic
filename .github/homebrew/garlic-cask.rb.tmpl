@@ -31,8 +31,11 @@ cask "garlic" do
   end
 
   caveats <<~EOS
-    garlic hooks into Claude Code. To install the hooks, run:
-      garlic setup
+    garlic works through its Claude Code plugin. In Claude Code, run:
+      /plugin marketplace add justanotherspy/claude-plugins
+      /plugin install garlic@justanotherspy
+    Run `garlic setup` to set your preferences. Without the plugin,
+    `garlic setup --hooks` installs plain hooks instead.
   EOS
 
   zap trash: "~/.garlic"

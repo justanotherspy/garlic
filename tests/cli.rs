@@ -301,6 +301,95 @@ fn setup_installs_hooks_and_command() {
     assert!(claude_dir.join("commands").join("garlic.md").exists());
 }
 
+#[test]
+fn hook_json_drives_a_whole_turn_for_the_plugin() {
+    // What the plugin's hooks module does: the same four events, `--json`.
+    let tmp = seeded(State {
+        date: current_date(2),
+        ..State::default()
+    });
+    let claude_dir = tmp.path().join(".claude");
+    let run = |event: &str| -> serde_json::Value {
+        let out = garlic(&gdir(&tmp))
+            .env("CLAUDE_HOME", &claude_dir)
+            .args(["hook", event, "--json"])
+            .write_stdin(r#"{"session_id":"s1"}"#)
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 1, "one JSON object on one line");
+        serde_json::from_str(text.trim()).unwrap()
+    };
+
+    let start = run("session-start");
+    assert_eq!(start["event"], "session-start");
+    assert_eq!(start["classic_hooks"], false);
+    assert!(start["nudge"].is_null());
+
+    let prompt = run("prompt");
+    assert_eq!(prompt["status"]["agents_running"], 1);
+    assert!(prompt.get("classic_hooks").is_none());
+
+    let tick = run("tick");
+    assert_eq!(tick["event"], "tick");
+    assert_eq!(tick["status"]["agents_running"], 1);
+
+    let stop = run("stop");
+    assert_eq!(stop["status"]["agents_running"], 0);
+    assert_eq!(stop["status"]["ignored"], false);
+
+    run("session-end");
+    let state = garlic::state::load_state(&Paths::with_dir(gdir(&tmp)), 2);
+    assert!(state.open.is_empty(), "session-end drops the cursor");
+}
+
+#[test]
+fn hook_json_session_start_reports_settings_hooks() {
+    let tmp = TempDir::new().unwrap();
+    let garlic_dir = tmp.path().join(".garlic");
+    let claude_dir = tmp.path().join(".claude");
+    let cmd = |args: &[&str]| {
+        let mut c = Command::cargo_bin("garlic").unwrap();
+        c.env("GARLIC_DIR", &garlic_dir)
+            .env("CLAUDE_HOME", &claude_dir)
+            .args(args);
+        c
+    };
+    cmd(&["setup", "--hooks", "-y"]).assert().success();
+    cmd(&["hook", "session-start", "--json"])
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""classic_hooks":true"#));
+
+    cmd(&["setup", "--plugin", "-y"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "/plugin install garlic@justanotherspy",
+        ));
+    cmd(&["hook", "session-start", "--json"])
+        .write_stdin("{}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""classic_hooks":false"#));
+}
+
+#[test]
+fn help_points_at_the_plugin() {
+    let tmp = TempDir::new().unwrap();
+    garlic(tmp.path())
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "/plugin install garlic@justanotherspy",
+        ));
+}
+
 // --- Remote (shared-state backend) integration ---------------------------
 //
 // garlic is local-first: hooks always write `state.toml`; a configured backend

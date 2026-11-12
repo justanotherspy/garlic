@@ -11,6 +11,33 @@ use crate::paths::ClaudePaths;
 
 pub const GARLIC_COMMAND: &str = "---\ndescription: Show accumulated active coding time today\nargument-hint: \"[status|status --week|status --month|ignore]\"\nallowed-tools: Bash(garlic:*)\n---\nRun `garlic $ARGUMENTS` (or `garlic status` if no arg) and show the output to me.\n";
 
+/// The marketplace garlic's plugin is published through.
+pub const MARKETPLACE: &str = "justanotherspy/claude-plugins";
+/// The plugin's id once that marketplace is added.
+pub const PLUGIN_ID: &str = "garlic@justanotherspy";
+
+/// Shown under `garlic --help`.
+pub const PLUGIN_HINT: &str =
+    "Recommended: let the Claude Code plugin do the tracking. In Claude Code:
+  /plugin marketplace add justanotherspy/claude-plugins
+  /plugin install garlic@justanotherspy
+It adds the garlic panel, break nudges and the /garlic command, and needs
+nothing written to ~/.claude/settings.json. `garlic setup --hooks` is the
+by-hand fallback.";
+
+/// The commands that install the plugin, as a person types them.
+pub fn plugin_install_lines() -> String {
+    [
+        "  In Claude Code:".to_string(),
+        format!("    /plugin marketplace add {MARKETPLACE}"),
+        format!("    /plugin install {PLUGIN_ID}"),
+        "  Or from a shell:".to_string(),
+        format!("    claude plugin marketplace add {MARKETPLACE}"),
+        format!("    claude plugin install {PLUGIN_ID}"),
+    ]
+    .join("\n")
+}
+
 /// (event, matcher, base command) for each hook garlic installs.
 const HOOK_DEFINITIONS: [(&str, &str, &str); 4] = [
     ("SessionStart", "startup", "garlic hook session-start"),
@@ -108,6 +135,96 @@ pub fn install_hooks(claude: &ClaudePaths, debug: bool) -> io::Result<()> {
         println!("removed legacy CLAUDE.md injection");
     }
     Ok(())
+}
+
+/// Read `~/.claude/settings.json` as a JSON object, if it is one.
+fn read_settings(claude: &ClaudePaths) -> Option<Value> {
+    let text = fs::read_to_string(claude.settings()).ok()?;
+    serde_json::from_str::<Value>(&text)
+        .ok()
+        .filter(Value::is_object)
+}
+
+/// Whether garlic's hooks are present in `~/.claude/settings.json`.
+pub fn classic_hooks_installed(claude: &ClaudePaths) -> bool {
+    read_settings(claude)
+        .as_ref()
+        .and_then(|s| s.get("hooks"))
+        .and_then(Value::as_object)
+        .is_some_and(|hooks| {
+            hooks
+                .values()
+                .filter_map(Value::as_array)
+                .any(|list| list.iter().any(is_garlic_entry))
+        })
+}
+
+/// Whether the garlic plugin is enabled in the user's settings, from any
+/// marketplace (`enabledPlugins` has a `garlic@…` key set to `true`).
+pub fn plugin_enabled(claude: &ClaudePaths) -> bool {
+    read_settings(claude)
+        .as_ref()
+        .and_then(|s| s.get("enabledPlugins"))
+        .and_then(Value::as_object)
+        .is_some_and(|plugins| {
+            plugins
+                .iter()
+                .any(|(id, on)| id.starts_with("garlic@") && on.as_bool() == Some(true))
+        })
+}
+
+/// Remove garlic's hooks from `~/.claude/settings.json` and the `/garlic`
+/// slash command `setup` wrote, leaving everything else as it was. Returns
+/// whether anything was removed.
+///
+/// A settings file that does not parse is left untouched: unlike an install,
+/// a removal has no business replacing a file it could not read. The slash
+/// command is only deleted while it still holds exactly what `setup` wrote.
+pub fn remove_hooks(claude: &ClaudePaths) -> io::Result<bool> {
+    let mut removed = false;
+
+    if let Some(mut settings) = read_settings(claude) {
+        let mut changed = false;
+        if let Some(hooks) = settings.get_mut("hooks").and_then(Value::as_object_mut) {
+            let mut emptied = Vec::new();
+            for (event, list) in hooks.iter_mut() {
+                let Some(list) = list.as_array_mut() else {
+                    continue;
+                };
+                let before = list.len();
+                list.retain(|e| !is_garlic_entry(e));
+                if list.len() != before {
+                    changed = true;
+                    if list.is_empty() {
+                        emptied.push(event.clone());
+                    }
+                }
+            }
+            // Drop only the event keys this emptied, so nothing is left behind
+            // and nothing that was already there is tidied away.
+            for event in emptied {
+                hooks.remove(&event);
+            }
+        }
+        if changed {
+            if settings
+                .get("hooks")
+                .and_then(Value::as_object)
+                .is_some_and(|h| h.is_empty())
+            {
+                settings.as_object_mut().unwrap().remove("hooks");
+            }
+            atomic_write_json(&claude.settings(), &settings)?;
+            removed = true;
+        }
+    }
+
+    let command = claude.commands_dir().join("garlic.md");
+    if fs::read_to_string(&command).is_ok_and(|text| text == GARLIC_COMMAND) {
+        fs::remove_file(&command)?;
+        removed = true;
+    }
+    Ok(removed)
 }
 
 /// Install the `/garlic` slash command into `~/.claude/commands/`.

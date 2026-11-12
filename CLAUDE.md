@@ -15,6 +15,12 @@ Read @Makefile for make targets.
 - **Tests must never touch the real `~/.garlic/` or `~/.claude/`.** Unit tests build a `Paths`/`ClaudePaths` rooted at a `tempfile::TempDir`; integration tests set the `GARLIC_DIR` (and `CLAUDE_HOME`) env var to a temp directory. (A round-trip test once corrupted `~/.garlic/state.toml`.)
 - Engine and date logic take an injected clock (`now`) so they're deterministic — pass a fixed value rather than reading the wall clock.
 
+## Plugin
+`plugins/garlic/` is the Claude Code plugin (a mod), published through `justanotherspy/claude-plugins`, which references this repository with no pinned ref: **a merge to main reaches plugin users before the next CLI release.** So the mod must keep working with the released `garlic` binary; `garlic hook <event> --json` is its contract with the CLI, and it falls back to the plain hook commands for an older binary.
+- After any change there: `claude plugin validate --strict plugins/garlic` and `claude plugin test plugins/garlic` (CI runs both with the CLI pinned in `.github/plugin-validate`).
+- A helper that takes `$` must be declared at the top of the module, not inside `register`.
+- Bump `version` in `plugins/garlic/.claude-plugin/plugin.json` when the plugin changes.
+
 ## Commits
 Use **Conventional Commits** — `git-cliff` parses them to build the changelog. Format: `<type>(<scope>): <description>`. Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, `perf`, `style`. Include the Linear ID when there is one: `feat(setup): add prompts (JUS-42)`.
 

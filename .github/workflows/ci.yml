@@ -36,6 +36,32 @@ jobs:
       - name: Run tests
         run: cargo test
 
+  plugin:
+    name: Plugin validate and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+      # `npm ci` installs the pinned CLI from the committed lockfile. Its native
+      # binary arrives through a postinstall script that npm may skip without
+      # failing, so run it again by hand when the binary does not start.
+      - name: Install Claude Code CLI
+        working-directory: .github/plugin-validate
+        run: |
+          npm ci
+          if ! ./node_modules/.bin/claude --version; then
+            node ./node_modules/@anthropic-ai/claude-code/install.cjs
+            ./node_modules/.bin/claude --version
+          fi
+      - name: Validate the garlic plugin
+        run: ./.github/plugin-validate/node_modules/.bin/claude plugin validate --strict ./plugins/garlic
+      - name: Test the garlic plugin
+        run: ./.github/plugin-validate/node_modules/.bin/claude plugin test ./plugins/garlic
+
   audit:
     runs-on: ubuntu-latest
     steps:
