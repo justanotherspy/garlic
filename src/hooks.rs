@@ -7,9 +7,11 @@ use std::io::{self, Write};
 
 use chrono::NaiveDateTime;
 
+use crate::commands::status_json;
 use crate::config::{load_config, Config};
 use crate::engine::{
-    check_bedtime, handle_prompt, handle_session_end, handle_session_start, handle_stop,
+    check_bedtime, check_thresholds_at, handle_prompt, handle_session_end, handle_session_start,
+    handle_stop, live_view, Project,
 };
 use crate::format::format_duration;
 use crate::nudges::{get_bedtime_nudge, get_nudge};
@@ -18,29 +20,47 @@ use crate::remote::Remote;
 use crate::state::{load_state, save_state, State};
 use crate::sync::{flush, hooks_block_on_sync};
 
-/// Build the nudge message (if any) for a prompt event from the inputs the
-/// local engine and the remote backend both produce: the highest threshold
-/// just crossed, whether we're in the bedtime window, and the ignore flag.
+/// A break nudge about to be shown: the hardcoded message plus what fired it.
+///
+/// The classic hook relays `message` through Claude (see [`frame_nudge`]); the
+/// plugin's hooks module shows it to the user directly, so it wants the raw
+/// text and the kind.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Nudge {
+    pub message: String,
+    /// `threshold`, `final` (the last threshold: "session over") or `bedtime`.
+    pub kind: &'static str,
+    /// The threshold crossed, in minutes; `None` for a bedtime nudge.
+    pub threshold_minutes: Option<i64>,
+}
+
+/// Build the nudge (if any) for an event from the inputs the local engine and
+/// the remote backend both produce: the highest threshold just crossed, whether
+/// we're in the bedtime window, and the ignore flag.
 fn nudge_for(
     config: &Config,
     accumulated_minutes: f64,
     ignored: bool,
     crossed: Option<i64>,
     bedtime: bool,
-) -> Option<String> {
+) -> Option<Nudge> {
     if ignored {
         return None;
     }
     if let Some(t) = crossed {
         let is_final = !config.nudge_thresholds_minutes.is_empty()
             && t == *config.nudge_thresholds_minutes.iter().max().unwrap();
-        Some(get_nudge(
-            &config.nudge_style,
-            accumulated_minutes,
-            is_final,
-        ))
+        Some(Nudge {
+            message: get_nudge(&config.nudge_style, accumulated_minutes, is_final),
+            kind: if is_final { "final" } else { "threshold" },
+            threshold_minutes: Some(t),
+        })
     } else if bedtime {
-        Some(get_bedtime_nudge(accumulated_minutes))
+        Some(Nudge {
+            message: get_bedtime_nudge(accumulated_minutes),
+            kind: "bedtime",
+            threshold_minutes: None,
+        })
     } else {
         None
     }
@@ -165,6 +185,21 @@ pub fn hook_prompt(
     debug: bool,
     out: &mut (impl Write + ?Sized),
 ) -> io::Result<()> {
+    if let Some(nudge) = prompt_core(paths, remote, session_id, now, now_local, debug)? {
+        write_nudge(out, &nudge.message)?;
+    }
+    Ok(())
+}
+
+/// The prompt event without its output: account the time, decide the nudge.
+pub fn prompt_core(
+    paths: &Paths,
+    remote: Option<&Remote>,
+    session_id: &str,
+    now: f64,
+    now_local: NaiveDateTime,
+    debug: bool,
+) -> io::Result<Option<Nudge>> {
     let config = load_config(paths);
     let mut state = load_state(paths, config.reset_hour);
     let local_crossed = handle_prompt(&mut state, &config, session_id, now, debug);
@@ -201,15 +236,72 @@ pub fn hook_prompt(
         ),
     };
 
-    if let Some(nudge) = nudge_for(&config, accumulated, ignored, crossed, bedtime) {
+    let nudge = nudge_for(&config, accumulated, ignored, crossed, bedtime);
+    if nudge.is_some() {
         // Flag the fresh nudge so the next `statusline` render flashes the garlic
         // icon, then re-persist (the earlier save predates this decision, which in
         // blocking mode also depends on the merged remote total).
         state.nudge_pending = true;
         save_state(paths, &state)?;
-        write_nudge(out, &nudge)?;
     }
-    Ok(())
+    Ok(nudge)
+}
+
+/// Handle a `tick`: no event happened, time just passed. Checks the thresholds
+/// and the bedtime window against the *live* total, so a nudge can arrive while
+/// a long agent turn is still running instead of at the next prompt.
+///
+/// Only verifiable time is projected ([`Project::AgentOnly`]): a reading gap is
+/// not counted until the next prompt confirms the user was there. The state
+/// file is written only when a nudge flag actually changed, so a tick a minute
+/// from every open session costs one read.
+pub fn hook_tick(paths: &Paths, now: f64, now_local: NaiveDateTime) -> io::Result<Option<Nudge>> {
+    let config = load_config(paths);
+    let mut state = load_state(paths, config.reset_hour);
+    let live = live_view(&state, &config, now, Project::AgentOnly);
+
+    let given_before = state.nudges_given.len();
+    let crossed = check_thresholds_at(&mut state, &config, live.total);
+    let bedtime =
+        crossed.is_none() && !state.ignored && check_bedtime(&mut state, &config, now_local);
+    let nudge = nudge_for(&config, live.total, state.ignored, crossed, bedtime);
+    if nudge.is_some() {
+        state.nudge_pending = true;
+    }
+    if nudge.is_some() || bedtime || state.nudges_given.len() != given_before {
+        save_state(paths, &state)?;
+    }
+    Ok(nudge)
+}
+
+/// What `garlic hook <event> --json` prints: one JSON object on one line, for
+/// the plugin's hooks module. `status` is the same object `garlic status
+/// --json` prints (local state, live as of `now`); `nudge` is the raw nudge
+/// for the module to show, or `null`.
+pub fn write_hook_json(
+    paths: &Paths,
+    event: &str,
+    nudge: Option<&Nudge>,
+    classic_hooks: Option<bool>,
+    now: f64,
+    out: &mut (impl Write + ?Sized),
+) -> io::Result<()> {
+    let config = load_config(paths);
+    let state = load_state(paths, config.reset_hour);
+    let mut obj = serde_json::json!({
+        "event": event,
+        "version": env!("CARGO_PKG_VERSION"),
+        "nudge": nudge.map(|n| serde_json::json!({
+            "message": n.message,
+            "kind": n.kind,
+            "threshold_minutes": n.threshold_minutes,
+        })),
+        "status": status_json(&state, &config, now),
+    });
+    if let Some(installed) = classic_hooks {
+        obj["classic_hooks"] = serde_json::json!(installed);
+    }
+    writeln!(out, "{}", serde_json::to_string(&obj)?)
 }
 
 /// Handle Stop hook: close the agent interval and open a user interval.
@@ -457,5 +549,102 @@ mod tests {
         );
         let state = load_state(&paths, 2);
         assert!(state.bedtime_nudge_given);
+    }
+
+    #[test]
+    fn tick_nudges_while_the_turn_is_still_running() {
+        // 55m tracked, and an agent turn that started 10 minutes ago: the
+        // 60m line was crossed mid-turn. The prompt hook would only notice at
+        // the next prompt; the tick notices now.
+        let s = with_cursor(55.0, "x", Kind::Agent, NOW - 600.0);
+        let (_tmp, paths) = setup(&s);
+        let nudge = hook_tick(&paths, NOW, local(10, 0)).unwrap().unwrap();
+        assert_eq!(nudge.kind, "threshold");
+        assert_eq!(nudge.threshold_minutes, Some(60));
+        assert!(!nudge.message.contains("[garlic]")); // raw, not the relay frame
+
+        let state = load_state(&paths, 2);
+        assert!(state.nudges_given.contains(&60));
+        assert!(state.nudge_pending);
+        // The tick projects; it books nothing.
+        assert_eq!(state.accumulated_minutes, 55.0);
+        assert!(state.intervals.is_empty());
+        // Once only: neither the next tick nor the next prompt repeats it.
+        assert!(hook_tick(&paths, NOW + 60.0, local(10, 1))
+            .unwrap()
+            .is_none());
+        assert!(
+            prompt_core(&paths, None, "x", NOW + 120.0, local(10, 2), false)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn tick_does_not_nudge_for_an_unconfirmed_reading_gap() {
+        // 58m tracked and the user has been quiet for 5 minutes. They may have
+        // walked off; that gap only counts once a prompt confirms it.
+        let s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
+        let (_tmp, paths) = setup(&s);
+        assert!(hook_tick(&paths, NOW, local(10, 0)).unwrap().is_none());
+        assert!(load_state(&paths, 2).nudges_given.is_empty());
+    }
+
+    #[test]
+    fn tick_leaves_the_state_file_alone_when_nothing_fired() {
+        let s = with_cursor(5.0, "x", Kind::Agent, NOW - 60.0);
+        let (_tmp, paths) = setup(&s);
+        let before = std::fs::metadata(paths.state())
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(hook_tick(&paths, NOW, local(10, 0)).unwrap().is_none());
+        let after = std::fs::metadata(paths.state())
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn tick_final_threshold_is_marked_final_and_paused_is_silent() {
+        let s = with_cursor(119.0, "x", Kind::Agent, NOW - 120.0);
+        let (_tmp, paths) = setup(&s); // thresholds [60, 120]
+        let nudge = hook_tick(&paths, NOW, local(10, 0)).unwrap().unwrap();
+        assert_eq!(nudge.kind, "final");
+
+        let mut paused = with_cursor(119.0, "x", Kind::Agent, NOW - 120.0);
+        paused.ignored = true;
+        let (_tmp2, paths2) = setup(&paused);
+        assert!(hook_tick(&paths2, NOW, local(10, 0)).unwrap().is_none());
+    }
+
+    #[test]
+    fn hook_json_carries_the_nudge_and_a_live_status() {
+        let s = with_cursor(58.0, "x", Kind::User, NOW - 300.0);
+        let (_tmp, paths) = setup(&s);
+        let nudge = prompt_core(&paths, None, "x", NOW, local(10, 0), false).unwrap();
+        let mut out = Vec::new();
+        // Ten minutes into the turn that prompt started.
+        write_hook_json(
+            &paths,
+            "prompt",
+            nudge.as_ref(),
+            Some(false),
+            NOW + 600.0,
+            &mut out,
+        )
+        .unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert_eq!(text.lines().count(), 1);
+        let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+        assert_eq!(v["event"], "prompt");
+        assert_eq!(v["nudge"]["kind"], "threshold");
+        assert_eq!(v["nudge"]["threshold_minutes"], 60);
+        assert_eq!(v["classic_hooks"], false);
+        assert_eq!(v["status"]["agents_running"], 1);
+        assert!((v["status"]["accumulated_minutes"].as_f64().unwrap() - 73.0).abs() < 0.01);
+        assert!(v.get("hookSpecificOutput").is_none());
     }
 }

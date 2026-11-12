@@ -8,12 +8,13 @@ use std::io::Write;
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 
+use crate::cli::unix_now;
 use crate::config::{load_config, save_config, Config, CONFIG_KEYS, VALID_NUDGE_STYLES};
+use crate::engine::{live_view, Project};
 use crate::format::format_duration;
-use crate::intervals::breakdown;
 use crate::paths::{ClaudePaths, Paths};
 use crate::remote::Remote;
-use crate::setup::install_hooks;
+use crate::setup::{install_hooks, plugin_enabled, plugin_install_lines, remove_hooks, PLUGIN_ID};
 use crate::state::{load_state, load_state_for_date, save_state, State};
 use crate::sync::flush;
 use crate::version::{check_latest_version, parse_version, CRATES_API_URL};
@@ -217,14 +218,50 @@ pub fn cmd_status(
         },
         None => local,
     };
-    status_core(&state, &config, json, out)
+    status_core(&state, &config, json, unix_now(), out)
+}
+
+/// The machine-readable status object: what `garlic status --json` prints and
+/// what `garlic hook <event> --json` embeds for the plugin.
+///
+/// Every figure is live as of `now` (in-flight intervals projected, see
+/// [`live_view`]) and deduplicated across sessions. The three `*_only` /
+/// `both` fields partition the total: time only you were active, time only
+/// agents were running, and time both were.
+pub fn status_json(state: &State, config: &Config, now: f64) -> serde_json::Value {
+    let live = live_view(state, config, now, Project::All);
+    let mut thresholds = config.nudge_thresholds_minutes.clone();
+    thresholds.sort_unstable();
+    let next_threshold = thresholds
+        .iter()
+        .find(|t| !state.nudges_given.contains(t))
+        .copied();
+    // Clamp: a migrated or backend-merged total can exceed what this machine's
+    // intervals explain, and float noise must not print as -0.0.
+    let both = (live.agent + live.user - live.total).max(0.0);
+    serde_json::json!({
+        "accumulated_minutes": live.total,
+        "agent_minutes": live.agent,
+        "user_minutes": live.user,
+        "overlap_minutes": live.overlap,
+        "user_only_minutes": (live.user - both).max(0.0),
+        "agent_only_minutes": (live.agent - both).max(0.0),
+        "both_minutes": both,
+        "agents_running": live.agents_running,
+        "thresholds": thresholds,
+        "nudges_given": state.nudges_given,
+        "next_threshold": next_threshold,
+        "ignored": state.ignored,
+        "date": state.date,
+    })
 }
 
 /// Render `status` from an already-loaded state and config (shared by the
-/// local and remote paths).
-fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) -> i32 {
-    let minutes = state.accumulated_minutes;
-    let split = breakdown(&state.intervals);
+/// local and remote paths). Figures are live as of `now`.
+fn status_core(state: &State, config: &Config, json: bool, now: f64, out: &mut dyn Write) -> i32 {
+    let live = live_view(state, config, now, Project::All);
+    let minutes = live.total;
+    let split = live;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
     let nudges_given = &state.nudges_given;
@@ -235,17 +272,7 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
         .copied();
 
     if json {
-        let obj = serde_json::json!({
-            "accumulated_minutes": minutes,
-            "agent_minutes": split.agent,
-            "user_minutes": split.user,
-            "overlap_minutes": split.overlap,
-            "thresholds": thresholds,
-            "nudges_given": nudges_given,
-            "next_threshold": next_threshold,
-            "ignored": ignored,
-            "date": state.date,
-        });
+        let obj = status_json(state, config, now);
         let _ = writeln!(out, "{}", serde_json::to_string(&obj).unwrap());
         return 0;
     }
@@ -281,6 +308,14 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
             out,
             "   {} with 2+ sessions running at once",
             format_duration(split.overlap),
+        );
+    }
+    if split.agents_running > 0 {
+        let n = split.agents_running;
+        let _ = writeln!(
+            out,
+            "   {n} agent{} running now (counted up to this moment)",
+            if n == 1 { "" } else { "s" },
         );
     }
 
@@ -345,7 +380,7 @@ fn status_core(state: &State, config: &Config, json: bool, out: &mut dyn Write) 
 pub fn cmd_statusline(paths: &Paths, out: &mut dyn Write) -> i32 {
     let config = load_config(paths);
     let state = load_state(paths, config.reset_hour);
-    let code = statusline_core(&state, &config, out);
+    let code = statusline_core(&state, &config, unix_now(), out);
     // A fresh nudge flashes the garlic icon for a single render; clear the flag
     // so the next refresh flips back to the vampire (working) icon. Re-read
     // first: a concurrent hook may have written new intervals between our load
@@ -361,8 +396,9 @@ pub fn cmd_statusline(paths: &Paths, out: &mut dyn Write) -> i32 {
     code
 }
 
-fn statusline_core(state: &State, config: &Config, out: &mut dyn Write) -> i32 {
-    let minutes = state.accumulated_minutes;
+fn statusline_core(state: &State, config: &Config, now: f64, out: &mut dyn Write) -> i32 {
+    let split = live_view(state, config, now, Project::All);
+    let minutes = split.total;
     let mut thresholds = config.nudge_thresholds_minutes.clone();
     thresholds.sort_unstable();
 
@@ -378,7 +414,6 @@ fn statusline_core(state: &State, config: &Config, out: &mut dyn Write) -> i32 {
     };
 
     // Agent vs. user split, so the bar shows where the time actually went.
-    let split = breakdown(&state.intervals);
     if split.agent > 0.0 || split.user > 0.0 {
         line.push_str(&format!(
             " {MIDDOT} agent {} {MIDDOT} user {}",
@@ -1013,16 +1048,95 @@ impl ConfigOverrides {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// How `garlic setup` wires garlic into Claude Code.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetupMode {
+    /// No flag given: ask at a terminal; under `-y`/`--defaults` install the
+    /// settings hooks unless the plugin is already enabled.
+    Ask,
+    /// `--plugin`: the plugin does the tracking; settings hooks are removed.
+    Plugin,
+    /// `--hooks`: install the settings hooks by hand, plugin or not.
+    Hooks,
+    /// `--remove-hooks`: only remove the settings hooks and slash command.
+    RemoveHooks,
+}
+
+/// The flags of `garlic setup`.
+#[derive(Clone, Copy, Debug)]
+pub struct SetupOptions {
+    pub mode: SetupMode,
+    pub debug: bool,
+    pub yes: bool,
+    pub defaults: bool,
+}
+
+/// Remove the settings hooks, reporting what happened.
+fn setup_remove_hooks(claude: &ClaudePaths, out: &mut dyn Write) -> i32 {
+    match remove_hooks(claude) {
+        Ok(true) => {
+            let _ = writeln!(
+                out,
+                "garlic: removed garlic's hooks and slash command from ~/.claude"
+            );
+            0
+        }
+        Ok(false) => {
+            let _ = writeln!(out, "garlic: no garlic hooks in ~/.claude/settings.json");
+            0
+        }
+        Err(e) => {
+            let _ = writeln!(out, "garlic: {e}");
+            1
+        }
+    }
+}
+
 pub fn cmd_setup(
     paths: &Paths,
     claude: &ClaudePaths,
-    debug: bool,
-    yes: bool,
-    defaults: bool,
+    options: SetupOptions,
     confirm: &mut dyn Confirm,
     out: &mut dyn Write,
 ) -> i32 {
+    let SetupOptions {
+        mode,
+        debug,
+        yes,
+        defaults,
+    } = options;
+
+    if mode == SetupMode::RemoveHooks {
+        return setup_remove_hooks(claude, out);
+    }
+
+    // Settle plugin vs. settings hooks first. The plugin is the default: it
+    // needs nothing written to settings.json and shows nudges itself. Without
+    // a terminal to ask at (`-y`, `--defaults`) plain `setup` keeps doing what
+    // it always did and installs the hooks, unless the plugin is already on,
+    // where a second copy of the hooks would be redundant.
+    let has_plugin = plugin_enabled(claude);
+    let use_plugin = match mode {
+        SetupMode::Plugin => true,
+        SetupMode::Hooks => false,
+        SetupMode::RemoveHooks => unreachable!("handled above"),
+        SetupMode::Ask if yes || defaults => has_plugin,
+        SetupMode::Ask => {
+            let _ = writeln!(
+                out,
+                "garlic works best as a Claude Code plugin: a panel with today's time,\n\
+                 nudges shown to you directly, and nothing written to settings.json.\n"
+            );
+            match confirm.ask("  Use the Claude Code plugin (recommended)? [Y/n] ") {
+                None => {
+                    let _ = writeln!(out, "\ngarlic: setup cancelled");
+                    return 1;
+                }
+                Some(answer) => !matches!(answer.trim().to_lowercase().as_str(), "n" | "no"),
+            }
+        }
+    };
+
     let mut overrides = ConfigOverrides::default();
 
     if defaults {
@@ -1062,23 +1176,69 @@ pub fn cmd_setup(
             return 1;
         }
     }
-
-    if let Err(e) = install_hooks(claude, debug) {
-        let _ = writeln!(out, "garlic: {e}");
-        return 1;
-    }
-
-    let mode = if debug { " (debug mode)" } else { "" };
-    let _ = writeln!(
-        out,
-        "garlic: hooks installed in ~/.claude/settings.json{mode}"
-    );
-    let _ = writeln!(
-        out,
-        "garlic: /garlic slash command installed in ~/.claude/commands/"
-    );
     if defaults {
         let _ = writeln!(out, "garlic: config reset to built-in defaults");
+    }
+
+    if use_plugin {
+        // The plugin tracks the same events; drop the settings hooks so each
+        // event is handled once and by the copy that can draw.
+        match remove_hooks(claude) {
+            Ok(true) => {
+                let _ = writeln!(
+                    out,
+                    "garlic: removed garlic's hooks from ~/.claude/settings.json (the plugin replaces them)"
+                );
+            }
+            Ok(false) => {}
+            Err(e) => {
+                let _ = writeln!(out, "garlic: {e}");
+                return 1;
+            }
+        }
+        if has_plugin {
+            let _ = writeln!(
+                out,
+                "garlic: the {PLUGIN_ID} plugin is enabled in Claude Code, so there is nothing to install.\n\
+                 \x20      Run /garlic in Claude Code to open the panel. (`garlic setup --hooks` installs\n\
+                 \x20      the settings hooks by hand instead.)"
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "garlic: config saved. Now install the plugin:\n{}\n\
+                 garlic: then run /garlic in Claude Code to open the panel.",
+                plugin_install_lines()
+            );
+        }
+    } else {
+        if let Err(e) = install_hooks(claude, debug) {
+            let _ = writeln!(out, "garlic: {e}");
+            return 1;
+        }
+        let mode_note = if debug { " (debug mode)" } else { "" };
+        let _ = writeln!(
+            out,
+            "garlic: hooks installed in ~/.claude/settings.json{mode_note}"
+        );
+        let _ = writeln!(
+            out,
+            "garlic: /garlic slash command installed in ~/.claude/commands/"
+        );
+        if has_plugin {
+            let _ = writeln!(
+                out,
+                "garlic: note: the {PLUGIN_ID} plugin is enabled too. Both track the same events\n\
+                 \x20      (time is not double-counted, but you only need one). `garlic setup --plugin`\n\
+                 \x20      keeps the plugin and removes these hooks."
+            );
+        } else {
+            let _ = writeln!(
+                out,
+                "garlic: tip: the Claude Code plugin does all of this without touching settings.json,\n\
+                 \x20      and adds a panel and on-screen nudges. `garlic setup --plugin` switches over."
+            );
+        }
     }
     if Remote::from_env().is_some() {
         let _ = writeln!(
@@ -1873,7 +2033,18 @@ mod tests {
         let claude = claude_env(&tmp);
         let mut confirm = ScriptedConfirm::new(vec![]);
         let mut out = Vec::new();
-        let code = cmd_setup(&paths, &claude, false, true, false, &mut confirm, &mut out);
+        let code = cmd_setup(
+            &paths,
+            &claude,
+            SetupOptions {
+                mode: SetupMode::Ask,
+                debug: false,
+                yes: true,
+                defaults: false,
+            },
+            &mut confirm,
+            &mut out,
+        );
         assert_eq!(code, 0);
         assert!(String::from_utf8(out).unwrap().contains("hooks installed"));
         assert!(claude.settings().exists());
@@ -1886,7 +2057,18 @@ mod tests {
         std::fs::write(paths.config(), "nudge_style = \"spicy\"\n").unwrap();
         let mut confirm = ScriptedConfirm::new(vec![]);
         let mut out = Vec::new();
-        cmd_setup(&paths, &claude, false, true, true, &mut confirm, &mut out);
+        cmd_setup(
+            &paths,
+            &claude,
+            SetupOptions {
+                mode: SetupMode::Ask,
+                debug: false,
+                yes: true,
+                defaults: true,
+            },
+            &mut confirm,
+            &mut out,
+        );
         assert!(String::from_utf8(out)
             .unwrap()
             .contains("config reset to built-in defaults"));
@@ -1899,7 +2081,18 @@ mod tests {
         let claude = claude_env(&tmp);
         let mut confirm = ScriptedConfirm::new(vec![Some("n")]);
         let mut out = Vec::new();
-        cmd_setup(&paths, &claude, false, false, true, &mut confirm, &mut out);
+        cmd_setup(
+            &paths,
+            &claude,
+            SetupOptions {
+                mode: SetupMode::Ask,
+                debug: false,
+                yes: false,
+                defaults: true,
+            },
+            &mut confirm,
+            &mut out,
+        );
         assert!(String::from_utf8(out).unwrap().contains("setup cancelled"));
         assert!(!claude.settings().exists());
     }
@@ -1908,11 +2101,206 @@ mod tests {
     fn setup_interactive_passes_overrides() {
         let (tmp, paths) = env();
         let claude = claude_env(&tmp);
-        let mut confirm = ScriptedConfirm::new(vec![Some("60"), Some(""), Some(""), Some("firm")]);
+        // First answer declines the plugin, so this is the by-hand path.
+        let mut confirm = ScriptedConfirm::new(vec![
+            Some("n"),
+            Some("60"),
+            Some(""),
+            Some(""),
+            Some("firm"),
+        ]);
         let mut out = Vec::new();
-        cmd_setup(&paths, &claude, false, false, false, &mut confirm, &mut out);
+        cmd_setup(
+            &paths,
+            &claude,
+            SetupOptions {
+                mode: SetupMode::Ask,
+                debug: false,
+                yes: false,
+                defaults: false,
+            },
+            &mut confirm,
+            &mut out,
+        );
         let config = load_config(&paths);
         assert_eq!(config.nudge_thresholds_minutes, vec![60, 120, 180, 240]);
         assert_eq!(config.nudge_style, "firm");
+        assert!(crate::setup::classic_hooks_installed(&claude));
+    }
+
+    fn setup_with(
+        mode: SetupMode,
+        yes: bool,
+        answers: Vec<Option<&str>>,
+    ) -> (TempDir, ClaudePaths, String) {
+        let (tmp, paths) = env();
+        let claude = claude_env(&tmp);
+        let (claude, out) = run_setup(&paths, claude, mode, yes, answers);
+        (tmp, claude, out)
+    }
+
+    fn run_setup(
+        paths: &Paths,
+        claude: ClaudePaths,
+        mode: SetupMode,
+        yes: bool,
+        answers: Vec<Option<&str>>,
+    ) -> (ClaudePaths, String) {
+        let mut confirm = ScriptedConfirm::new(answers);
+        let mut out = Vec::new();
+        let code = cmd_setup(
+            paths,
+            &claude,
+            SetupOptions {
+                mode,
+                debug: false,
+                yes,
+                defaults: false,
+            },
+            &mut confirm,
+            &mut out,
+        );
+        assert_eq!(code, 0);
+        (claude, String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn setup_interactive_defaults_to_the_plugin() {
+        // Enter at the first question takes the plugin: config is saved, the
+        // install commands are printed, and settings.json is not written.
+        let (_tmp, claude, out) = setup_with(
+            SetupMode::Ask,
+            false,
+            vec![Some(""), Some(""), Some(""), Some(""), Some("spicy")],
+        );
+        assert!(out.contains("/plugin marketplace add justanotherspy/claude-plugins"));
+        assert!(out.contains("/plugin install garlic@justanotherspy"));
+        assert!(!claude.settings().exists());
+    }
+
+    #[test]
+    fn setup_plugin_removes_settings_hooks_and_keeps_the_rest() {
+        let (tmp, paths) = env();
+        let claude = claude_env(&tmp);
+        std::fs::create_dir_all(claude.settings().parent().unwrap()).unwrap();
+        std::fs::write(
+            claude.settings(),
+            r#"{"model":"opus","hooks":{"Stop":[{"matcher":"","hooks":[{"type":"command","command":"say done"}]}]}}"#,
+        )
+        .unwrap();
+        // Install by hand first, then switch to the plugin.
+        let (claude, _) = run_setup(&paths, claude, SetupMode::Hooks, true, vec![]);
+        assert!(crate::setup::classic_hooks_installed(&claude));
+        assert!(claude.commands_dir().join("garlic.md").exists());
+
+        let (claude, out) = run_setup(&paths, claude, SetupMode::Plugin, true, vec![]);
+        assert!(out.contains("removed garlic's hooks"));
+        assert!(!crate::setup::classic_hooks_installed(&claude));
+        assert!(!claude.commands_dir().join("garlic.md").exists());
+        let settings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(claude.settings()).unwrap()).unwrap();
+        assert_eq!(settings["model"], "opus");
+        assert_eq!(
+            settings["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "say done"
+        );
+        assert!(settings["hooks"].get("UserPromptSubmit").is_none());
+    }
+
+    #[test]
+    fn setup_yes_skips_hooks_when_the_plugin_is_enabled() {
+        let (tmp, paths) = env();
+        let claude = claude_env(&tmp);
+        std::fs::create_dir_all(claude.settings().parent().unwrap()).unwrap();
+        std::fs::write(
+            claude.settings(),
+            r#"{"enabledPlugins":{"garlic@justanotherspy":true}}"#,
+        )
+        .unwrap();
+        let (claude, out) = run_setup(&paths, claude, SetupMode::Ask, true, vec![]);
+        assert!(out.contains("nothing to install"));
+        assert!(!crate::setup::classic_hooks_installed(&claude));
+        // `--hooks` is the explicit override.
+        let (claude, out) = run_setup(&paths, claude, SetupMode::Hooks, true, vec![]);
+        assert!(out.contains("hooks installed"));
+        assert!(crate::setup::classic_hooks_installed(&claude));
+    }
+
+    #[test]
+    fn setup_remove_hooks_leaves_an_edited_slash_command() {
+        let (tmp, paths) = env();
+        let claude = claude_env(&tmp);
+        let (claude, _) = run_setup(&paths, claude, SetupMode::Hooks, true, vec![]);
+        let command = claude.commands_dir().join("garlic.md");
+        std::fs::write(&command, "my own version\n").unwrap();
+        let (claude, _) = run_setup(&paths, claude, SetupMode::RemoveHooks, true, vec![]);
+        assert!(!crate::setup::classic_hooks_installed(&claude));
+        assert!(command.exists());
+        // Nothing left to remove the second time.
+        let (_, out) = run_setup(&paths, claude, SetupMode::RemoveHooks, true, vec![]);
+        assert!(out.contains("no garlic hooks"));
+    }
+
+    #[test]
+    fn status_counts_a_turn_that_is_still_running() {
+        use crate::intervals::{Kind, OpenCursor};
+        let (_tmp, paths) = env();
+        let now = unix_now();
+        let state = State {
+            date: crate::state::current_date(load_config(&paths).reset_hour),
+            accumulated_minutes: 10.0,
+            open: vec![OpenCursor {
+                session_id: "a".into(),
+                kind: Kind::Agent,
+                start: now - 20.0 * 60.0,
+            }],
+            ..State::default()
+        };
+        let config = load_config(&paths);
+        let json = status_json(&state, &config, now);
+        assert!((json["accumulated_minutes"].as_f64().unwrap() - 30.0).abs() < 0.01);
+        assert!((json["agent_minutes"].as_f64().unwrap() - 20.0).abs() < 0.01);
+        assert_eq!(json["agents_running"], 1);
+
+        let mut out = Vec::new();
+        statusline_core(&state, &config, now, &mut out);
+        assert!(String::from_utf8(out).unwrap().contains("30m"));
+    }
+
+    #[test]
+    fn status_json_partitions_the_total() {
+        use crate::intervals::{Interval, Kind};
+        let (_tmp, paths) = env();
+        let config = load_config(&paths);
+        let iv = |s: &str, kind, a: f64, b: f64| Interval {
+            session_id: s.into(),
+            kind,
+            start: a * 60.0,
+            end: b * 60.0,
+        };
+        // Session a: agent 0-60. Session b: user 30-90. So 30m you only,
+        // 30m agents only, 30m both: 90m of wall clock, never 120.
+        let state = State {
+            accumulated_minutes: 90.0,
+            intervals: vec![
+                iv("a", Kind::Agent, 0.0, 60.0),
+                iv("b", Kind::User, 30.0, 90.0),
+            ],
+            ..State::default()
+        };
+        let json = status_json(&state, &config, 1e9);
+        let f = |k: &str| json[k].as_f64().unwrap();
+        assert!((f("accumulated_minutes") - 90.0).abs() < 1e-6);
+        assert!((f("agent_minutes") - 60.0).abs() < 1e-6);
+        assert!((f("user_minutes") - 60.0).abs() < 1e-6);
+        assert!((f("both_minutes") - 30.0).abs() < 1e-6);
+        assert!((f("user_only_minutes") - 30.0).abs() < 1e-6);
+        assert!((f("agent_only_minutes") - 30.0).abs() < 1e-6);
+        assert!(
+            (f("user_only_minutes") + f("agent_only_minutes") + f("both_minutes")
+                - f("accumulated_minutes"))
+            .abs()
+                < 1e-6
+        );
     }
 }
