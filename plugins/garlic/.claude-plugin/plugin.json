@@ -1,7 +1,7 @@
 {
   "name": "garlic",
-  "version": "0.1.0",
-  "description": "Ward off AI burnout — track active Claude Code time via hooks and get break nudges, plus a /garlic status command. Requires the garlic binary on PATH (cargo install garlic-ward).",
+  "version": "0.2.0",
+  "description": "Ward off AI burnout. garlic tracks the time you spend in Claude Code against the time your agents run, deduplicated across parallel sessions, and shows it in a small panel with break nudges you can pause or reset. Open the panel with /garlic. Requires the garlic binary on PATH (brew install --cask justanotherspy/tap/garlic, or cargo install garlic-ward).",
   "author": {
     "name": "justanotherspy",
     "email": "daniel.schwartz@hey.com"
@@ -9,5 +9,14 @@
   "homepage": "https://github.com/justanotherspy/garlic",
   "repository": "https://github.com/justanotherspy/garlic",
   "license": "MIT",
-  "keywords": ["productivity", "wellbeing", "time-tracking", "hooks", "claude-code"]
+  "keywords": ["productivity", "wellbeing", "time-tracking", "mod", "claude-code"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "status_line": {
+      "type": "boolean",
+      "title": "Status line",
+      "description": "Keep today's time on the status line under the prompt.",
+      "default": true
+    }
+  }
 }

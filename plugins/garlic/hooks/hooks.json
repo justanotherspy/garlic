@@ -1,36 +1,3 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup",
-        "hooks": [
-          { "type": "command", "command": "garlic hook session-start" }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          { "type": "command", "command": "garlic hook prompt" }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          { "type": "command", "command": "garlic hook stop" }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "matcher": "",
-        "hooks": [
-          { "type": "command", "command": "garlic hook session-end" }
-        ]
-      }
-    ]
-  }
+  "modules": ["./register.tsx"]
 }
